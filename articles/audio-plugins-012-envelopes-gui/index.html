@@ -1,0 +1,164 @@
+<!DOCTYPE html> <html lang=en> <head> <meta charset=utf-8> <meta http-equiv=X-UA-Compatible content="IE=edge,chrome=1"> <meta name=HandheldFriendly content=True> <meta name=MobileOptimized content=320> <meta name=viewport content="width=device-width"> <meta http-equiv=cleartype content=on> <meta property="fb:admins" content=100001493355877> <meta property="og:image" content="http://www.martin-finke.de/blog/img/making_audio_plugins_thumbnail.png"> <meta property="og:image:type" content="image/png"> <meta property="og:image:width" content=100> <meta property="og:image:height" content=100> <title>Making Audio Plugins Part 12: Envelope GUI - Martin Finke's Blog </title> <link rel=alternate href="/blog/feed.xml" type="application/rss+xml" title="Music &amp; Programming"> <link href="http://fonts.googleapis.com/css?family=Domine:700|Inconsolata:400,700" rel=stylesheet type="text/css"> <link rel=stylesheet href='/blog/css/4407aa6.css'> </head> <body class=article-detail> <header class=header> <div class=content-wrap> <h1>Making Audio Plugins Part 12: Envelope GUI</h1> <div class=taglinks><a href="/blog/tags/programming.html" class=taglink>Programming</a>, <a href="/blog/tags/dsp.html" class=taglink>DSP</a>, <a href="/blog/tags/making_audio_plugins.html" class=taglink>Making Audio Plugins</a> </div> </div> </header> <div id=content> <div class=content-wrap> <article class=article> <section class=content><p>Let’s add some knobs to change our volume envelope in real-time! <span class=more></span> While we’re at it, we will also add a switch to change the waveform. This is the look we’re going for (click <a href="/blog/articles/audio-plugins-012-envelopes-gui/gui.tif">here</a> for a <span class=caps>TIF</span> with all the&nbsp;layers):</p> <p><a href="/blog/articles/audio-plugins-012-envelopes-gui/gui.png"><img src="/blog/articles/audio-plugins-012-envelopes-gui/gui.png" alt=""></a></p> <h2 id=creating-the-gui>Creating the&nbsp;<span class=caps>GUI</span></h2> <p>Download the following files and add them to the&nbsp;project:</p> <ul> <li><a href="/blog/articles/audio-plugins-012-envelopes-gui/bg.png">bg.png</a></li> <li><a href="/blog/articles/audio-plugins-012-envelopes-gui/knob.png">knob.png</a> (Credits to <a href="http://www.kvraudio.com/forum/viewtopic.php?p=3075317#3075317">Bootsie</a>)</li> <li><a href="/blog/articles/audio-plugins-012-envelopes-gui/waveform.png">waveform.png</a></li> </ul> <p>Make sure you copy them to the project folder and add them to all targets (as always). Now open <em>resource.h</em> and add the&nbsp;references:</p> <pre><code class="lang-cpp"><span class="comment">// Unique IDs for each image resource.</span>
+<span class="preprocessor">#define BG_ID         101</span>
+<span class="preprocessor">#define WHITE_KEY_ID  102</span>
+<span class="preprocessor">#define BLACK_KEY_ID  103</span>
+<span class="preprocessor">#define WAVEFORM_ID   104</span>
+<span class="preprocessor">#define KNOB_ID       105</span>
+
+<span class="comment">// Image resource locations for this plug.</span>
+<span class="preprocessor">#define BG_FN         "resources/img/bg.png"</span>
+<span class="preprocessor">#define WHITE_KEY_FN  "resources/img/whitekey.png"</span>
+<span class="preprocessor">#define BLACK_KEY_FN  "resources/img/blackkey.png"</span>
+<span class="preprocessor">#define WAVEFORM_FN   "resources/img/waveform.png"</span>
+<span class="preprocessor">#define KNOB_FN       "resources/img/knob.png"</span>
+</code></pre> <p>While you’re there, change the <span class=caps>GUI</span> height to match the dimensions of <em>bg.png</em>:</p> <pre><code class="lang-cpp"><span class="preprocessor">#define GUI_HEIGHT 296</span>
+</code></pre> <p>Also edit the beginning of <em>Synthesis.rc</em>:</p> <pre><code class="lang-cpp"><span class="preprocessor">#include "resource.h"</span>
+
+BG_ID       <span class="caps">PNG</span> BG_FN
+WHITE_KEY_ID       <span class="caps">PNG</span> WHITE_KEY_FN
+BLACK_KEY_ID       <span class="caps">PNG</span> BLACK_KEY_FN
+WAVEFORM_ID       <span class="caps">PNG</span> WAVEFORM_FN
+KNOB_ID       <span class="caps">PNG</span> KNOB_FN
+</code></pre> <p>We need to add parameters for the waveform and for the envelope stages <em>Attack</em>, <em>Decay</em>, <em>Sustain</em> and <em>Release</em>. Go into <em>Synthesis.cpp</em> and change the <code>EParams</code>:</p> <pre><code class="lang-cpp"><span class="keyword">enum</span> EParams
+{
+    mWaveform = <span class="number">0</span>,
+    mAttack,
+    mDecay,
+    mSustain,
+    mRelease,
+    kNumParams
+};
+</code></pre> <p>Also change the virtual keyboard’s position so it’s at the&nbsp;bottom:</p> <pre><code class="lang-cpp"><span class="keyword">enum</span> ELayout
+{
+    kWidth = GUI_WIDTH,
+    kHeight = GUI_HEIGHT,
+    kKeybX = <span class="number">1</span>,
+    kKeybY = <span class="number">230</span>
+};
+</code></pre> <p>Now go to <em>Oscillator.h</em> and change the <code>OscillatorMode</code> to include the total number of&nbsp;modes:</p> <pre><code class="lang-cpp"><span class="keyword">enum</span> OscillatorMode {
+    OSCILLATOR_MODE_SINE = <span class="number">0</span>,
+    OSCILLATOR_MODE_SAW,
+    OSCILLATOR_MODE_SQUARE,
+    OSCILLATOR_MODE_TRIANGLE,
+    kNumOscillatorModes
+};
+</code></pre> <p>Change the initializer list so the sine wave is the&nbsp;default:</p> <pre><code class="lang-cpp">Oscillator() :
+    mOscillatorMode(OSCILLATOR_MODE_SINE),
+    <span class="comment">// ...</span>
+</code></pre> <p>Building the <span class=caps>GUI</span> is done in the constructor. Add the following just before the <code>AttachGraphics(pGraphics)</code> line:</p> <pre><code class="lang-cpp"><span class="comment">// Waveform switch</span>
+GetParam(mWaveform)-&gt;InitEnum(<span class="string">"Waveform"</span>, OSCILLATOR_MODE_SINE, kNumOscillatorModes);
+GetParam(mWaveform)-&gt;SetDisplayText(<span class="number">0</span>, <span class="string">"Sine"</span>); <span class="comment">// Needed for <span class="caps">VST3</span>, thanks plunntic</span>
+IBitmap waveformBitmap = pGraphics-&gt;LoadIBitmap(WAVEFORM_ID, WAVEFORM_FN, <span class="number">4</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> ISwitchControl(<span class="keyword">this</span>, <span class="number">24</span>, <span class="number">53</span>, mWaveform, &amp;waveformBitmap));
+
+<span class="comment">// Knob bitmap for <span class="caps">ADSR</span></span>
+IBitmap knobBitmap = pGraphics-&gt;LoadIBitmap(KNOB_ID, KNOB_FN, <span class="number">64</span>);
+<span class="comment">// Attack knob:</span>
+GetParam(mAttack)-&gt;InitDouble(<span class="string">"Attack"</span>, <span class="number">0.01</span>, <span class="number">0.01</span>, <span class="number">10.0</span>, <span class="number">0.001</span>);
+GetParam(mAttack)-&gt;SetShape(<span class="number">3</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">95</span>, <span class="number">34</span>, mAttack, &amp;knobBitmap));
+<span class="comment">// Decay knob:</span>
+GetParam(mDecay)-&gt;InitDouble(<span class="string">"Decay"</span>, <span class="number">0.5</span>, <span class="number">0.01</span>, <span class="number">15.0</span>, <span class="number">0.001</span>);
+GetParam(mDecay)-&gt;SetShape(<span class="number">3</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">177</span>, <span class="number">34</span>, mDecay, &amp;knobBitmap));
+<span class="comment">// Sustain knob:</span>
+GetParam(mSustain)-&gt;InitDouble(<span class="string">"Sustain"</span>, <span class="number">0.1</span>, <span class="number">0.001</span>, <span class="number">1.0</span>, <span class="number">0.001</span>);
+GetParam(mSustain)-&gt;SetShape(<span class="number">2</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">259</span>, <span class="number">34</span>, mSustain, &amp;knobBitmap));
+<span class="comment">// Release knob:</span>
+GetParam(mRelease)-&gt;InitDouble(<span class="string">"Release"</span>, <span class="number">1.0</span>, <span class="number">0.001</span>, <span class="number">15.0</span>, <span class="number">0.001</span>);
+GetParam(mRelease)-&gt;SetShape(<span class="number">3</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">341</span>, <span class="number">34</span>, mRelease, &amp;knobBitmap));
+</code></pre> <p>First, we create the <code>mWaveform</code> parameter. It’s an <code>Enum</code> parameter with the default value of <code>OSCILLATOR_MODE_SINE</code> and <code>kNumOscillatorModes</code> possible values. The we load the <em>waveform.png</em> bitmap. Here we use the literal <code>4</code> for the number of frames. We could use <code>kNumOscillatorModes</code>, which at the moment has the value of <code>4</code>. But if we add additional waveforms to the oscillator and we don’t change <em>waveform.png</em> to include them, it will break. We then create a <code>new ISwitchControl</code>, passing the coordinates and linking it to the <code>mWaveform</code> parameter.<br>For the knobs, we import <em>knob.png</em> just <em>once</em> and use it for all four <code>IKnobMultiControl</code>s. We use <code>SetShape</code> to make the knobs more sensitive for small values (and more coarse for large values). We’re setting the same default values as in the <code>EnvelopeGenerator</code>‘s constructor. This duplication could be avoided. You can choose the minimum and maximum values freely (the 3<span class=ord>rd</span> and 4<span class=ord>th</span> parameter to <code>InitDouble</code>).</p> <h2 id=handling-value-changes>Handling Value&nbsp;Changes</h2> <p>Reacting to user input is done by implementing <code>OnParamChange</code> (in <em>Synthesis.cpp</em>):</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::OnParamChange(<span class="keyword">int</span> paramIdx)
+{
+    IMutexLock lock(<span class="keyword">this</span>);
+    <span class="keyword">switch</span>(paramIdx) {
+        <span class="keyword">case</span> mWaveform:
+            mOscillator.setMode(<span class="keyword">static_cast</span>&lt;OscillatorMode&gt;(GetParam(mWaveform)-&gt;Int()));
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> mAttack:
+        <span class="keyword">case</span> mDecay:
+        <span class="keyword">case</span> mSustain:
+        <span class="keyword">case</span> mRelease:
+            mEnvelopeGenerator.setStageValue(<span class="keyword">static_cast</span>&lt;EnvelopeGenerator::EnvelopeStage&gt;(paramIdx), GetParam(paramIdx)-&gt;Value());
+            <span class="keyword">break</span>;
+    }
+}
+</code></pre> <p>For the <code>mWaveform</code> case, we get the <code>int</code> value and simply cast it to <code>OscillatorMode</code>.<br>As you can see, all envelope parameters share the same line of code. If you compare the <code>EParams</code> and <code>EnvelopeStage</code> <code>enum</code>s, you’ll see that in both of them, <em>Attack</em>, <em>Decay</em>, <em>Sustain</em> and <em>Release</em> have the values <code>1</code>, <code>2</code>, <code>3</code> and <code>4</code>, respectively. Therefore, <code>static_cast&lt;EnvelopeGenerator::EnvelopeStage&gt;(paramIdx)</code> gives us the changed <code>EnvelopeStage</code>. And <code>GetParam(paramIdx)-&gt;Value()</code> gives us the value of the changed stage. So we can just call <code>setStageValue</code> with these two. But we haven’t implemented it yet! Add the following member function prototype to the <code>public</code> section of the <code>EnvelopeGenerator</code> class:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> setStageValue(EnvelopeStage stage, <span class="keyword">double</span> value);
+</code></pre> <p>Let’s imagine for a moment that this was a simple&nbsp;setter:</p> <pre><code class="lang-cpp"><span class="comment">// This won't be enough:</span>
+<span class="keyword">void</span> EnvelopeGenerator::setStageValue(EnvelopeStage stage,
+                                      <span class="keyword">double</span> value) {
+    stageValue[stage] = value;
+}
+</code></pre> <p>What if we change the <code>stageValue[ENVELOPE_STAGE_ATTACK]</code> while the generator is in that stage? This implementation doesn’t call <code>calculateMultiplier</code> or set <code>nextStageSampleIndex</code>. So the generator will only consider the change <em>the next time it enters</em> the given stage. This is also true for the <span class=caps>SUSTAIN</span> stage: You can’t hold a note and tweak the knob to find the right sustain level.<br>This is inconvenient and you wouldn’t find this in a professional plugin. When we turn a knob, we want to hear the change immediately.<br>So whenever we change the value for the stage the generator is currently in, the generator should update its values. This means calling <code>calculateMultiplier</code> with a new time interval <em>and</em> recalculating <code>nextStageSampleIndex</code>.</p> <pre><code class="lang-cpp"><span class="keyword">void</span> EnvelopeGenerator::setStageValue(EnvelopeStage stage,
+                                      <span class="keyword">double</span> value) {
+    stageValue[stage] = value;
+    <span class="keyword">if</span> (stage == currentStage) {
+        <span class="comment">// Re-calculate the multiplier and nextStageSampleIndex</span>
+        <span class="keyword">if</span>(currentStage == ENVELOPE_STAGE_ATTACK ||
+                currentStage == ENVELOPE_STAGE_DECAY ||
+                currentStage == ENVELOPE_STAGE_RELEASE) {
+            <span class="keyword">double</span> nextLevelValue;
+            <span class="keyword">switch</span> (currentStage) {
+                <span class="keyword">case</span> ENVELOPE_STAGE_ATTACK:
+                    nextLevelValue = <span class="number">1.0</span>;
+                    <span class="keyword">break</span>;
+                <span class="keyword">case</span> ENVELOPE_STAGE_DECAY:
+                    nextLevelValue = fmax(stageValue[ENVELOPE_STAGE_SUSTAIN], minimumLevel);
+                    <span class="keyword">break</span>;
+                <span class="keyword">case</span> ENVELOPE_STAGE_RELEASE:
+                    nextLevelValue = minimumLevel;
+                    <span class="keyword">break</span>;
+                <span class="keyword">default</span>:
+                    <span class="keyword">break</span>;
+            }
+            <span class="comment">// How far the generator is into the current stage:</span>
+            <span class="keyword">double</span> currentStageProcess = (currentSampleIndex + <span class="number">0.0</span>) / nextStageSampleIndex;
+            <span class="comment">// How much of the current stage is left:</span>
+            <span class="keyword">double</span> remainingStageProcess = <span class="number">1.0</span> - currentStageProcess;
+            <span class="keyword">unsigned</span> <span class="keyword">long</span> <span class="keyword">long</span> samplesUntilNextStage = remainingStageProcess * value * sampleRate;
+            nextStageSampleIndex = currentSampleIndex + samplesUntilNextStage;
+            calculateMultiplier(currentLevel, nextLevelValue, samplesUntilNextStage);
+        } <span class="keyword">else</span> <span class="keyword">if</span>(currentStage == ENVELOPE_STAGE_SUSTAIN) {
+            currentLevel = value;
+        }
+    }
+}
+</code></pre> <p>The inner <code>if</code> statement checks if the generator is in a stage that uses <code>nextStageSampleIndex</code> to expire (i.e. <span class=caps>ATTACK</span>, <span class=caps>DECAY</span> or <span class=caps>RELEASE</span>). <code>nextLevelValue</code> is the level value the generator is currently transitioning to. It is set just like inside the <code>enterStage</code> function. The interesting part is below the <code>switch</code> statement: Whatever phase the generator currently is in, it should behave according to the new value <em>for the rest of the current stage</em>. So we have to split the current stage into the past and the future part. First we calculate how far the generator is into the current stage. For example, <code>0.1</code> means “10% done”. <code>remainingStageProcess</code> is how much is left in the current stage. We can then calculate <code>samplesUntilNextStage</code> and update <code>nextStageSampleIndex</code>. Finally (and most importantly), we call <code>calculateMultiplier</code> to get a transition from <code>currentLevel</code> to <code>nextLevelValue</code> over <code>samplesUntilNextStage</code> samples.<br>The <span class=caps>SUSTAIN</span> case is simple: We just set <code>currentLevel</code> to the new&nbsp;value.</p> <p>With this implementation, we have covered <em>almost</em> all cases. There’s one more special case we have to handle: When the generator is in <span class=caps>DECAY</span> stage and the <span class=caps>SUSTAIN</span> value is changed. With the current implementation, it will decay to the <em>old</em> sustain level, and when the decay stage is over, it will <em>jump</em> to the <em>new</em> sustain level. To correct this behaviour, add the following at the end of <code>setStageValue</code>:</p> <pre><code class="lang-cpp"><span class="keyword">if</span> (currentStage == ENVELOPE_STAGE_DECAY &amp;&amp;
+    stage == ENVELOPE_STAGE_SUSTAIN) {
+    <span class="comment">// We have to decay to a different sustain value than before.</span>
+    <span class="comment">// Re-calculate multiplier:</span>
+    <span class="keyword">unsigned</span> <span class="keyword">long</span> <span class="keyword">long</span> samplesUntilNextStage = nextStageSampleIndex - currentSampleIndex;
+    calculateMultiplier(currentLevel,
+                        fmax(stageValue[ENVELOPE_STAGE_SUSTAIN], minimumLevel),
+                        samplesUntilNextStage);
+}
+</code></pre> <p>This makes sure we’re decaying to the new sustain level. Note that we’re not changing <code>nextStageSampleIndex</code> here because it’s not affected by the sustain&nbsp;level.</p> <p>Run the plugin. You can cycle through waveforms by clicking on the waveform icon. Tweak all four knobs while playing and holding notes and see how it immediately reacts and does what we&nbsp;want.</p> <h2 id=further-improvements>Further&nbsp;Improvements</h2> <p>Have a look at this part of <code>ProcessDoubleReplacing</code>:</p> <pre><code class="lang-cpp"><span class="keyword">int</span> velocity = mMIDIReceiver.getLastVelocity();
+<span class="keyword">if</span> (velocity &gt; <span class="number">0</span>) {
+    mOscillator.setFrequency(mMIDIReceiver.getLastFrequency());
+    mOscillator.setMuted(<span class="keyword">false</span>);
+} <span class="keyword">else</span> {
+    mOscillator.setMuted(<span class="keyword">true</span>);
+}
+</code></pre> <p>Remember <a href="/blog/articles/audio-plugins-011-envelopes/#no_longer_resetting_velocity">that we decided not to reset the <span class=caps>MIDI</span> receiver’s <code>mLastVelocity</code> anymore</a>? This means that after the first played note, <code>mOscillator</code> will never be muted again. So it will keep generating a waveform even when no note is played. Change the <code>for</code> loop to look like&nbsp;this:</p> <pre><code class="lang-cpp"><span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; nFrames; ++i) {
+    mMIDIReceiver.advance();
+    <span class="keyword">int</span> velocity = mMIDIReceiver.getLastVelocity();
+    mOscillator.setFrequency(mMIDIReceiver.getLastFrequency());
+    leftOutput[i] = rightOutput[i] = mOscillator.nextSample() * mEnvelopeGenerator.nextSample() * velocity / <span class="number">127.0</span>;
+}
+</code></pre> <p>So when should <code>mOscillator</code> generate a waveform? Whenever <code>mEnvelopeGenerator.currentStage</code> is not <code>ENVELOPE_STAGE_OFF</code>. So the right place to react is inside <code>mEnvelopeGenerator.enterStage</code>. Of course, for reasons explained <a href="/blog/articles/audio-plugins-011-envelopes/#avoiding_coupling">before</a>, we’re not going to call something on <code>mOscillator</code> here. We’re again using <a href="/blog/articles/audio-plugins-011-envelopes/#signals_slots">Signals <span class=amp>&amp;</span> Slots</a> for a clean solution. In <em>EnvelopeGenerator.h</em>, add the following two lines before the class&nbsp;definition:</p> <pre><code class="lang-cpp"><span class="preprocessor">#include "GallantSignal.h"</span>
+<span class="keyword">using</span> Gallant::Signal0;
+</code></pre> <p>Add two <code>Signal</code>s to the <code>public</code> section:</p> <pre><code class="lang-cpp">Signal0&lt;&gt; beganEnvelopeCycle;
+Signal0&lt;&gt; finishedEnvelopeCycle;
+</code></pre> <p>In <em>EnvelopeGenerator.cpp</em>, add the following at the very beginning of <code>enterStage</code>:</p> <pre><code class="lang-cpp"><span class="keyword">if</span> (currentStage == newStage) <span class="keyword">return</span>;
+<span class="keyword">if</span> (currentStage == ENVELOPE_STAGE_OFF) {
+    beganEnvelopeCycle();
+}
+<span class="keyword">if</span> (newStage == ENVELOPE_STAGE_OFF) {
+    finishedEnvelopeCycle();
+}
+</code></pre> <p>The first <code>if</code> statement just makes sure that the generator can’t go from a stage into that same stage. The other two <code>if</code> statements&nbsp;mean:</p> <ul> <li>When we go <em>out of</em> the <span class=caps>OFF</span> stage, it means we’re beginning a new&nbsp;cycle.</li> <li>When we go <em>into</em> the <span class=caps>OFF</span> stage, it means we have finished a&nbsp;cycle.</li> </ul> <p>Let’s react to the <code>Signal</code>! Add the following <code>private</code> member functions to <em>Synthesis.h</em>:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">void</span> onBeganEnvelopeCycle() { mOscillator.setMuted(<span class="keyword">false</span>); }
+<span class="keyword">inline</span> <span class="keyword">void</span> onFinishedEnvelopeCycle() { mOscillator.setMuted(<span class="keyword">true</span>); }
+</code></pre> <p>When an envelope cycle begins, we unmute the oscillator. When it ends, we mute the oscillator again.<br>In <em>Synthesis.cpp</em>, connect signal and slot at the very end of the&nbsp;constructor:</p> <pre><code class="lang-cpp">mEnvelopeGenerator.beganEnvelopeCycle.Connect(<span class="keyword">this</span>, &amp;Synthesis::onBeganEnvelopeCycle);
+mEnvelopeGenerator.finishedEnvelopeCycle.Connect(<span class="keyword">this</span>, &amp;Synthesis::onFinishedEnvelopeCycle);
+</code></pre> <p>That’s it! Run the plugin and it should behave just like before! If you press Cmd+Alt+P in Reaper (Ctrl+Alt+P on Windows) you’ll get a performance&nbsp;meter:</p> <p><a href="/blog/articles/audio-plugins-012-envelopes-gui/performance-meter.png"><img src="/blog/articles/audio-plugins-012-envelopes-gui/performance-meter.png" alt=""></a></p> <p>The percent value marked red is the track’s total <span class=caps>CPU</span> usage. It should go up whenever you play a note, and down again whenever it has fully faded out. That’s because the oscillator won’t have to calculate sample&nbsp;values.</p> <p>Now we have a very nice envelope generator! Click <a href="/blog/articles/audio-plugins-012-envelopes-gui/source.zip">here</a> to download the source files for this post.<br>Up next: <a href="/blog/articles/audio-plugins-013-filter/">How to create a filter</a>!</p> </section> </article> <div id=donation_prompt>If you found this useful, please feel free to <form action="https://www.paypal.com/cgi-bin/webscr" method=post target=_top class=donation-form> <input type=hidden name=cmd value=_s-xclick> <input type=hidden name=hosted_button_id value=JQDU8W5PJBWL6> <input type=hidden name=ref value="/blog/articles/audio-plugins-012-envelopes-gui/"> <input type=image src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif" border=0 name=submit alt="PayPal - The safer, easier way to pay online!"><img alt="" border=0 src="https://www.paypalobjects.com/de_DE/i/scr/pixel.gif" width=1 height=1> </form>! </div> <iframe src="//www.facebook.com/plugins/like.php?href=http%3A%2F%2Fwww.martin-finke.de%2Fblog%2F&amp;width=450&amp;height=21&amp;colorscheme=light&amp;layout=button_count&amp;action=like&amp;show_faces=false&amp;send=false" scrolling=no frameborder=0 style="border: none; overflow: hidden; width: 200px; height: 21px;" allowtransparency=true></iframe> <div class=comments> <div id=disqus_thread></div> <script type="text/javascript">var disqus_shortname="martinfinke";(function(){var a=document.createElement("script");a.type="text/javascript";a.async=true;a.src="//"+disqus_shortname+".disqus.com/embed.js";(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(a)})();</script> <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript> <a href="http://disqus.com" class=dsq-brlink>comments powered by <span class=logo-disqus>| Disqus</span></a> </div> </div> </div> <footer> <div class=content-wrap> <div class=nav><a href="/blog/">« Index</a></div> <section class=copy> <p>&copy; 2015 Martin Finke – <a href="/blog/impressum.html" class=impressum-link>Impressum</a></p> </section> </div> </footer> <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script> <script>window.jQuery||document.write('<script src="/blog/js/vendor/jquery-1.10.2.min.js"><\/script>');</script> <script type="text/javascript">$(document).ready(function(){$('a:link[href^=http]:not([href*="martin-finke.de"])').attr("target","_blank")});</script> <script type="text/javascript">var _gaq=_gaq||[];_gaq.push(["_setAccount","UA-43375106-1"]);_gaq.push(["_trackPageview"]);(function(){var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src=("https:"==document.location.protocol?"https://":"http://")+"stats.g.doubleclick.net/dc.js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(b,a)})();</script> </body> </html>

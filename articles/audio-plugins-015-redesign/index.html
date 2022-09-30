@@ -1,0 +1,242 @@
+<!DOCTYPE html> <html lang=en> <head> <meta charset=utf-8> <meta http-equiv=X-UA-Compatible content="IE=edge,chrome=1"> <meta name=HandheldFriendly content=True> <meta name=MobileOptimized content=320> <meta name=viewport content="width=device-width"> <meta http-equiv=cleartype content=on> <meta property="fb:admins" content=100001493355877> <meta property="og:image" content="http://www.martin-finke.de/blog/img/making_audio_plugins_thumbnail.png"> <meta property="og:image:type" content="image/png"> <meta property="og:image:width" content=100> <meta property="og:image:height" content=100> <title>Making Audio Plugins Part 15: Redesign - Martin Finke's Blog </title> <link rel=alternate href="/blog/feed.xml" type="application/rss+xml" title="Music &amp; Programming"> <link href="http://fonts.googleapis.com/css?family=Domine:700|Inconsolata:400,700" rel=stylesheet type="text/css"> <link rel=stylesheet href='/blog/css/4407aa6.css'> </head> <body class=article-detail> <header class=header> <div class=content-wrap> <h1>Making Audio Plugins Part 15: Redesign</h1> <div class=taglinks><a href="/blog/tags/programming.html" class=taglink>Programming</a>, <a href="/blog/tags/making_audio_plugins.html" class=taglink>Making Audio Plugins</a> </div> </div> </header> <div id=content> <div class=content-wrap> <article class=article> <section class=content><p>We have created the components needed for a classic subtractive synth. We will now redesign the plugin with a clear concept in mind. <span class=more></span></p> <p>Our plugin will be a polyphonic subtractive synth called <em>SpaceBass</em>:</p> <div class=youtube-video><iframe width="100%" height="100%" src="//www.youtube.com/embed/8cjuburLVgc?rel=0" frameborder=0 allowfullscreen></iframe></div> <p>The plugin will have two oscillators that can be mixed using the “mix” knob. All the way to the left you’ll only hear oscillator one, all the way to the right only oscillator two. At the twelve o’clock position they’ll be mixed fifty-fifty. The “pitch mod” knobs control how much the oscillator’s pitch is affected by the <span class=caps>LFO</span>. The volume and filter envelope are just the ones we’ve already implemented and used. The filter section has an added knob labelled “<span class=caps>LFO</span> amount”. This knob controls how much the <span class=caps>LFO</span> will affect the filter’s cutoff frequency. We’re leaving a little space right of the <span class=caps>LFO</span> for the&nbsp;future.</p> <p>Pretty nice, right? These are the plugin’s features we have already&nbsp;finished:</p> <ul> <li><span class=caps>MIDI</span>&nbsp;Receiver</li> <li>Virtual <span class=caps>MIDI</span>&nbsp;Keyboard</li> <li>Oscillator</li> <li>Volume&nbsp;Envelope</li> <li>Multimode&nbsp;Filter</li> <li>Filter&nbsp;Envelope</li> <li><span class=caps>LFO</span></li> </ul> <p>And this is our To-Do List for the next three&nbsp;posts:</p> <ul> <li>New&nbsp;Design</li> <li><a href="http://en.wikipedia.org/wiki/Polyphony_and_monophony_in_instruments">Polyphony</a> (i.e. playing multiple notes at one&nbsp;time)</li> <li>Oscillator Mix (this is&nbsp;easy)</li> <li>Oscillator Pitch&nbsp;Modulation</li> </ul> <p>As you can see, the majority of features are already done! It’s a good example of how a fresh user interface can turn things around.<br>First we’ll look at the Design and how it’s done in Photoshop. The main part will be polyphony, because it’ll change the structure quite a bit. Finally, we’ll add pitch&nbsp;modulation.</p> <p>This tutorial is split into three parts: This post about design, <a href="/blog/articles/audio-plugins-016-polyphony/">Polyphony Part I</a> and <a href="/blog/articles/audio-plugins-017-polyphony-ii/">Polyphony Part <span class=caps>II</span></a>. The polyphony part is split into two posts because it’ll take some work. I hope what I’ve written is clear and easy to follow. If you get stuck somewhere, please don’t hesitate to write a comment, and I’ll help you&nbsp;out.</p> <h2 id=a-new-design>A New&nbsp;Design</h2> <p>The knob is a slightly modified version of <a href="http://www.lesliesanford.com/KnobManStuff/Knobs.shtml">Leslie Sanford’s Boss-like Knob</a>. I’ve just made it smaller, the line is longer and the shadow is slightly different. You can download the modified version <a href="/blog/articles/audio-plugins-015-redesign/BossLikeKnob.knob">here</a>. The keyboard at the bottom was done using <a href="http://naldzgraphics.net/tutorials/piano-app-ui-in-photoshop/">this&nbsp;tutorial</a>.</p> <p>I will not explain every step about how to create the <span class=caps>GUI</span> in Photoshop, but we’ll have a look at the various layers and how things are done. <a href="/blog/articles/audio-plugins-015-redesign/gui.tif.zip">Download the zipped <span class=caps>TIF</span> file</a>, unpack it and open the <span class=caps>TIF</span> file in Photoshop (or <span class=caps>GIMP</span>). I’ve tried to leave everything intact and non-destructive so you can go into the layers and see how everything’s done. If you want to change text. you’ll need two fonts: <a href="http://www.formfett.net/tusj-one-handwritten-font/">Tusj</a> for the logo and <a href="http://best-font.com/font/Avenir85Heavy8532.html">Avenir 85 Heavy</a> for the labels.<br><em><span class=caps>EDIT</span>: Unfortunately, Avenir is not free anymore, but you can use Helvetica as a replacement</em>.<br>Download the Tusj font and put it in <em>~/Library/Fonts/</em> (<a href="http://support.microsoft.com/kb/314960/en-us">click here</a> if you’re using&nbsp;Windows).</p> <h2 id=smart-objects-and-vector-shapes>Smart Objects and Vector&nbsp;Shapes</h2> <p>If you browse through the layers in Photohop, you’ll notice that most things are based on vectors and <a href="http://help.adobe.com/en_US/photoshop/cs/using/WS41A5B796-6846-4e95-8459-95243441E126.html">smart objects</a>. I highly recommend using smart objects&nbsp;whenever:</p> <ol> <li>You need the same component (e.g. the knob) in more than one&nbsp;place</li> <li>You want to apply effects to a group (and you’re using a Photoshop version prior to&nbsp;<span class=caps>CS6</span>)</li> <li>You want to rotate something non-destructively, i.e. when you rotate it back, there’ll be no quality&nbsp;loss.</li> </ol> <p>The first point is true for the knob and the waveform switch. Both appear in several places and look exactly the same. Select the <em>Move</em> tool (by pressing <em>V</em>). Now click on a waveform switch while holding the Cmd key. In the layer palette a layer named <em>Shapes</em> will be highlighted. Double-click its preview icon to open the smart object. As you can see, the waveforms are vector&nbsp;shapes:</p> <p><a href="/blog/articles/audio-plugins-015-redesign/shapes.png"><img src="/blog/articles/audio-plugins-015-redesign/shapes.png" alt=""></a></p> <p>The advantage of vector shapes is that you can scale, rotate and otherwise modify them as much as you want <em>without loss</em>. So if at some point we need a <span class=caps>GUI</span> for <a href="http://en.wikipedia.org/wiki/Retina_Display">retina displays</a>, we can just scale the image! Of course we would have to export the knob again from JKnobMan, but since all knobs in the <span class=caps>TIF</span> are the same smart object, it would be very easy to replace&nbsp;them.</p> <p>Let’s investigate the <em>Keyboard</em> layer group. You can see that there are four octaves. An octave is a smart object, so if we make a change to one octave, it will be reflected in all of them. Open <em>Octave 4</em> (by double-clicking the layer icon). Look at the layer&nbsp;palette:</p> <p><a href="/blog/articles/audio-plugins-015-redesign/key-layers.png"><img src="/blog/articles/audio-plugins-015-redesign/key-layers.png" alt=""></a></p> <p>Here, all black keys point to the same smart object; and all white keys point to one smart object. Double-click any of the icons to open a black key. Now look at the layer palette: You can see that the black key consists of three vector&nbsp;shapes:</p> <p><a href="/blog/articles/audio-plugins-015-redesign/black-key-layers.png"><img src="/blog/articles/audio-plugins-015-redesign/black-key-layers.png" alt=""></a></p> <p>Imagine we want the black keys to have slightly more rounded edges. If we had just used <em>duplicate layer</em> to get all the black keys, we’d be in trouble! But with this <a href="http://en.wikipedia.org/wiki/Inception">Inception</a>-style use of smart objects, it’s just a matter of modifying the black key <em>once</em> and it’ll be applied to all black&nbsp;keys.</p> <p>Keep the following points in mind when using&nbsp;Photoshop:</p> <ol> <li>Work <em>non-destructively</em> whenever possible. Use <a href="http://bigstockblog.squarespace.com/blog/what-are-smart-filters-and-why-should-i-use-them">smart filters</a>, don’t scale bitmap content, and avoid rasterizing layers. If you rasterize something, be aware that <em>you lose all information about how that thing was done</em>. If you absolutely have to, make sure you leave a backup copy in case you have to go&nbsp;back.</li> <li>Avoid duplication by using smart objects. Whenever you duplicate something, ask yourself whether you’re going to modify the copy. If you just need a duplicate copy, you should probably convert it to a smart object&nbsp;first.</li> <li>Use the <a href="http://psd.tutsplus.com/tutorials/tools-tips/photoshops-pen-tool-the-comprehensive-guide/">pen tool</a> to resize things like rounded rectangles (and other vector shapes). That way, you’ll leave the rounded edges&nbsp;intact.</li> </ol> <p>When you design your own virtual keyboard, here are a few&nbsp;hints:</p> <ul> <li>When you design the normal (non-pressed) keys, keep in mind that you’ll need <em>darker</em> versions for the pressed state. If your black keys look like a solid black bar in the normal state, it’ll be difficult to make them look “more pressed” than&nbsp;that.</li> <li>Make sure all white keys have the same width and all black keys have the same&nbsp;width.</li> <li>For pressed keys, C <span class=amp>&amp;</span> F and E and B will have the same graphic. Make sure C♯ <span class=amp>&amp;</span> F♯ and E♭ <span class=amp>&amp;</span> B♭ have the same offset, otherwise you’ll get overlaps or&nbsp;gaps.</li> <li>When you design the pressed keys, avoid semi-transparent overlap. Use layer masks to make sure that each pressed key only affects its own area. If it has drop shadow or outer glow, they won’t be visible when using <code>IKeyboardControl</code>.</li> <li><code>IKeyboardControl</code> expects the highest key to be a C, so you’ll need a white key without a black key on top. If you’re working non-destructively, this shouldn’t be a&nbsp;problem.</li> </ul> <p>Here’s another small hint: The letter “S” appears three times in the “<span class=caps>SPACE</span> <span class=caps>BASS</span>” logo text. With a grungy font like this, it’s unnatural if all S’s have the exact same dirt around them. So I used a layer mask to hide little bits of dirt here and there. Now each of them looks slightly different, which is more&nbsp;realistic.</p> <h2 id=exporting-graphics>Exporting&nbsp;Graphics</h2> <p>We have to export the <span class=caps>GUI</span> components as separate <span class=caps>PNG</span> files, so we can reference them from our plugin code. You can do the export by hand, or you can just download the following six files.<br>The background image contains all the static parts and the virtual keyboard with all keys in unpressed&nbsp;state:</p> <p><a href="/blog/articles/audio-plugins-015-redesign/bg.png"><img src="/blog/articles/audio-plugins-015-redesign/bg.png" alt=""></a></p> <p>Here are the switches for waveform and filter&nbsp;mode:</p> <p><a href="/blog/articles/audio-plugins-015-redesign/waveform.png"><img src="/blog/articles/audio-plugins-015-redesign/waveform.png" alt=""></a></p> <p><a href="/blog/articles/audio-plugins-015-redesign/filtermode.png"><img src="/blog/articles/audio-plugins-015-redesign/filtermode.png" alt=""></a></p> <p>And the knob. I’m hiding the other knob turn states here, but they’re contained in the image&nbsp;file:</p> <div class="mask height-64"><a href="/blog/articles/audio-plugins-015-redesign/knob.png"><img src="/blog/articles/audio-plugins-015-redesign/knob.png" alt=""></a></div> <p>Recall that <a href="/blog/articles/audio-plugins-010-virtual-keyboard/#virtual_keyboard_white_key_frames">the <code>IKeyboardControl</code> needs <em>six</em> pressed white keys</a>: C/F, D, E/B, G, A and high C. Here’s the <span class=caps>PNG</span> with all of them below one&nbsp;another:</p> <div class=key-sprite-wrapper> <a href="/blog/articles/audio-plugins-015-redesign/whitekey.png"><img src="/blog/articles/audio-plugins-015-redesign/whitekey.png" alt=""></a> <div class="key-description number-1">C/F</div> <div class="key-description number-2">D</div> <div class="key-description number-3">E/B</div> <div class="key-description number-4">G</div> <div class="key-description number-5">A</div> <div class="key-description number-6">high C</div> </div> <p>The black keys are simpler. There’s just one pressed image for all of&nbsp;them:</p> <p><a href="/blog/articles/audio-plugins-015-redesign/blackkey.png"><img src="/blog/articles/audio-plugins-015-redesign/blackkey.png" alt=""></a></p> <h2 id=implementing-the-gui-in-code>Implementing the <span class=caps>GUI</span> in&nbsp;Code</h2> <p>Instead of starting from scratch, let’s clone our <em>Synthesis</em> project. Open <em>Terminal.app</em>, <code>cd</code> into the <em>IPlugExamples</em> folder and run the <code>duplicate</code> script:</p> <pre><code>cd ~/plugin-development/wdl-ol/IPlugExamples/
+./duplicate.py Synthesis/ SpaceBass YourName
+</code></pre><p>If you haven’t followed the previous posts, you can download the <em>Synthesis</em> project from <a href="/blog/articles/audio-plugins-015-redesign/Synthesis_finished.zip">here</a>. Unzip that and run the <code>duplicate</code> script.</p> <p>Copy all six image files you downloaded (or exported) above to the newly created <em>SpaceBass</em> folder and overwrite the existing files. Now open <em>SpaceBass.xcodeproj</em>. We don’t need the <em>knob_small.png</em> anymore. In the project navigator, go to <em>Resources</em> → <em>img</em>, right-click <em>knob_small.png</em> and choose <em>Delete</em>. From the popup, choose <em>Move to&nbsp;Trash</em>.</p> <p>Since we’re using the same filenames as before, we only have to make two minor changes to <em>resource.h</em>. Remove the <code>KNOB_SMALL_ID</code> and <code>KNOB_SMALL_FN</code>, so the code looks like&nbsp;this:</p> <pre><code class="lang-cpp"><span class="comment">// Unique IDs for each image resource.</span>
+<span class="preprocessor">#define BG_ID         101</span>
+<span class="preprocessor">#define WHITE_KEY_ID  102</span>
+<span class="preprocessor">#define BLACK_KEY_ID  103</span>
+<span class="preprocessor">#define WAVEFORM_ID   104</span>
+<span class="preprocessor">#define KNOB_ID       105</span>
+<span class="preprocessor">#define FILTERMODE_ID 106</span>
+
+<span class="comment">// Image resource locations for this plug.</span>
+<span class="preprocessor">#define BG_FN         "resources/img/bg.png"</span>
+<span class="preprocessor">#define WHITE_KEY_FN  "resources/img/whitekey.png"</span>
+<span class="preprocessor">#define BLACK_KEY_FN  "resources/img/blackkey.png"</span>
+<span class="preprocessor">#define WAVEFORM_FN   "resources/img/waveform.png"</span>
+<span class="preprocessor">#define KNOB_FN       "resources/img/knob.png"</span>
+<span class="preprocessor">#define FILTERMODE_FN "resources/img/filtermode.png"</span>
+</code></pre> <p>Also, our <span class=caps>GUI</span> has become a little larger. Change the dimensions to match those of <em>bg.png</em>:</p> <pre><code class="lang-cpp"><span class="comment">// <span class="caps">GUI</span> default dimensions</span>
+<span class="preprocessor">#define GUI_WIDTH 571</span>
+<span class="preprocessor">#define GUI_HEIGHT 500</span>
+</code></pre> <p>Modify the top of <em>SpaceBass.rc</em> to contain the new&nbsp;graphics:</p> <pre><code class="lang-cpp"><span class="preprocessor">#include "resource.h"</span>
+
+BG_ID       <span class="caps">PNG</span> BG_FN
+WHITE_KEY_ID       <span class="caps">PNG</span> WHITE_KEY_FN
+BLACK_KEY_ID       <span class="caps">PNG</span> BLACK_KEY_FN
+WAVEFORM_ID       <span class="caps">PNG</span> WAVEFORM_FN
+KNOB_ID       <span class="caps">PNG</span> KNOB_FN
+FILTERMODE_ID       <span class="caps">PNG</span> FILTERMODE_FN
+</code></pre> <p>Now let’s make a small change to our <code>Oscillator</code> class: We’re going to move the <code>enum OscillatorMode</code> inside the class, so it’s accessed as <code>Oscillator::OscillatorMode</code> from outside. We’ve done it like this in the <code>Filter</code> and <code>EnvelopeGenerator</code> classes, so it’s a good idea to change it here, too.<br>First, swap the <code>public</code> and <code>private</code> sections, so <code>public</code> is before <code>private</code>. Then, move the <code>enum OscillatorMode</code> from outside the class to the top of the <code>public</code> section. It should now look like&nbsp;this:</p> <pre><code class="lang-cpp"><span class="keyword">class</span> Oscillator {
+<span class="keyword">public</span>:
+    <span class="keyword">enum</span> OscillatorMode {
+        OSCILLATOR_MODE_SINE = <span class="number">0</span>,
+        OSCILLATOR_MODE_SAW,
+        OSCILLATOR_MODE_SQUARE,
+        OSCILLATOR_MODE_TRIANGLE,
+        kNumOscillatorModes
+    };
+    <span class="keyword">void</span> setMode(OscillatorMode mode);
+    <span class="keyword">void</span> setFrequency(<span class="keyword">double</span> frequency);
+    <span class="keyword">void</span> setSampleRate(<span class="keyword">double</span> sampleRate);
+    <span class="keyword">void</span> generate(<span class="keyword">double</span>* buffer, <span class="keyword">int</span> nFrames);
+    <span class="keyword">inline</span> <span class="keyword">void</span> setMuted(<span class="keyword">bool</span> muted) { isMuted = muted; }
+    <span class="keyword">double</span> nextSample();
+    Oscillator() :
+        mOscillatorMode(OSCILLATOR_MODE_SINE),
+        mPI(<span class="number">2</span>*<span class="built_in">acos</span>(<span class="number">0.0</span>)),
+        twoPI(<span class="number">2</span> * mPI),
+        isMuted(<span class="keyword">true</span>),
+        mFrequency(<span class="number">440.0</span>),
+        mPhase(<span class="number">0.0</span>),
+    mSampleRate(<span class="number">44100.0</span>) { updateIncrement(); };
+<span class="keyword">private</span>:
+    OscillatorMode mOscillatorMode;
+    <span class="keyword">const</span> <span class="keyword">double</span> mPI;
+    <span class="keyword">const</span> <span class="keyword">double</span> twoPI;
+    <span class="keyword">bool</span> isMuted;
+    <span class="keyword">double</span> mFrequency;
+    <span class="keyword">double</span> mPhase;
+    <span class="keyword">double</span> mSampleRate;
+    <span class="keyword">double</span> mPhaseIncrement;
+    <span class="keyword">void</span> updateIncrement();
+};
+</code></pre> <p>Let’s get busy with the actual <span class=caps>GUI</span> code! Starting in <em>SpaceBass.h</em>, add the following <code>private</code> member&nbsp;functions:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> CreateParams();
+<span class="keyword">void</span> CreateGraphics();
+</code></pre> <p>These are just to remove all the <span class=caps>GUI</span> code from the constructor. While you’re there, remove the <code>double mFrequency</code> if you like. We don’t need it anymore. Now let’s move on to <em>SpaceBass.cpp</em>. Right above <code>enum EParams</code>, add the following&nbsp;constant:</p> <pre><code class="lang-cpp"><span class="keyword">const</span> <span class="keyword">double</span> parameterStep = <span class="number">0.001</span>;
+</code></pre> <p>This is the “precision” at which the user can move a knob in the <span class=caps>GUI</span>. It’s used for every knob, so it’s a good idea to create a constant instead of hardcoding it all over the place.<br>Our plugin has more parameters than before. Change <code>EParams</code> to&nbsp;this:</p> <pre><code class="lang-cpp"><span class="keyword">enum</span> EParams
+{
+    <span class="comment">// Oscillator Section:</span>
+    mOsc1Waveform = <span class="number">0</span>,
+    mOsc1PitchMod,
+    mOsc2Waveform,
+    mOsc2PitchMod,
+    mOscMix,
+    <span class="comment">// Filter Section:</span>
+    mFilterMode,
+    mFilterCutoff,
+    mFilterResonance,
+    mFilterLfoAmount,
+    mFilterEnvAmount,
+    <span class="comment">// <span class="caps">LFO</span>:</span>
+    mLFOWaveform,
+    mLFOFrequency,
+    <span class="comment">// Volume Envelope:</span>
+    mVolumeEnvAttack,
+    mVolumeEnvDecay,
+    mVolumeEnvSustain,
+    mVolumeEnvRelease,
+    <span class="comment">// Filter Envelope:</span>
+    mFilterEnvAttack,
+    mFilterEnvDecay,
+    mFilterEnvSustain,
+    mFilterEnvRelease,
+    kNumParams
+};
+</code></pre> <p>The location of the virtual keyboard has changed, too. Change <code>ELayout</code>:</p> <pre><code class="lang-cpp"><span class="keyword">enum</span> ELayout
+{
+    kWidth = GUI_WIDTH,
+    kHeight = GUI_HEIGHT,
+    kKeybX = <span class="number">62</span>,
+    kKeybY = <span class="number">425</span>
+};
+</code></pre> <h2 id=all-parameters-in-one-place>All Parameters in One&nbsp;Place</h2> <p>Instead of having a lot of <code>InitDouble()</code> and <code>new IKnobMultiControl</code> calls like before, let’s move all information about our <span class=caps>GUI</span> to its own data structure. Add this <code>struct</code> below <code>EParams</code>:</p> <pre><code class="lang-cpp"><span class="keyword">typedef</span> <span class="keyword">struct</span> {
+    <span class="keyword">const</span> <span class="keyword">char</span>* name;
+    <span class="keyword">const</span> <span class="keyword">int</span> x;
+    <span class="keyword">const</span> <span class="keyword">int</span> y;
+    <span class="keyword">const</span> <span class="keyword">double</span> defaultVal;
+    <span class="keyword">const</span> <span class="keyword">double</span> minVal;
+    <span class="keyword">const</span> <span class="keyword">double</span> maxVal;
+} parameterProperties_struct;
+</code></pre> <p>So this contains the parameter <code>name</code>, the gui coordinates of the knob (or switch), and default/min/max values (if the parameter is a <code>double</code>). For the three switches, we’re not going to use <code>default</code>/<code>min</code>/<code>maxVal</code>. Because of the static typing, that would make things overly complicated.<br>Below that, we’ll create a data structure that holds (almost) our parameter data. We need one <code>parameterProperties_struct</code> for every parameter, so it’ll be an array of length <code>kNumParams</code>:</p> <pre><code class="lang-cpp"><span class="keyword">const</span> parameterProperties_struct parameterProperties[kNumParams] =
+</code></pre> <p>Below that, add the actual values. Note that we’re leaving the <code>default</code>/<code>min</code>/<code>maxVal</code>s uninitialized for the <code>enum</code> type parameters like <em>Filter Mode</em>:</p> <pre><code class="lang-cpp">{
+    {.name=<span class="string">"Osc 1 Waveform"</span>, .x=<span class="number">30</span>, .y=<span class="number">75</span>},
+    {.name=<span class="string">"Osc 1 Pitch Mod"</span>, .x=<span class="number">69</span>, .y=<span class="number">61</span>, .defaultVal=<span class="number">0.0</span>, .minVal=<span class="number">0.0</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"Osc 2 Waveform"</span>, .x=<span class="number">203</span>, .y=<span class="number">75</span>},
+    {.name=<span class="string">"Osc 2 Pitch Mod"</span>, .x=<span class="number">242</span>, .y=<span class="number">61</span>, .defaultVal=<span class="number">0.0</span>, .minVal=<span class="number">0.0</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"Osc Mix"</span>, .x=<span class="number">130</span>, .y=<span class="number">61</span>, .defaultVal=<span class="number">0.5</span>, .minVal=<span class="number">0.0</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"Filter Mode"</span>, .x=<span class="number">30</span>, .y=<span class="number">188</span>},
+    {.name=<span class="string">"Filter Cutoff"</span>, .x=<span class="number">69</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">0.99</span>, .minVal=<span class="number">0.0</span>, .maxVal=<span class="number">0.99</span>},
+    {.name=<span class="string">"Filter Resonance"</span>, .x=<span class="number">124</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">0.0</span>, .minVal=<span class="number">0.0</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"Filter <span class="caps">LFO</span> Amount"</span>, .x=<span class="number">179</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">0.0</span>, .minVal=<span class="number">0.0</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"Filter Envelope Amount"</span>, .x=<span class="number">234</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">0.0</span>, .minVal=-<span class="number">1.0</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"<span class="caps">LFO</span> Waveform"</span>, .x=<span class="number">30</span>, .y=<span class="number">298</span>},
+    {.name=<span class="string">"<span class="caps">LFO</span> Frequency"</span>, .x=<span class="number">69</span>, .y=<span class="number">284</span>, .defaultVal=<span class="number">6.0</span>, .minVal=<span class="number">0.01</span>, .maxVal=<span class="number">30.0</span>},
+    {.name=<span class="string">"Volume Env Attack"</span>, .x=<span class="number">323</span>, .y=<span class="number">61</span>, .defaultVal=<span class="number">0.01</span>, .minVal=<span class="number">0.01</span>, .maxVal=<span class="number">10.0</span>},
+    {.name=<span class="string">"Volume Env Decay"</span>, .x=<span class="number">378</span>, .y=<span class="number">61</span>, .defaultVal=<span class="number">0.5</span>, .minVal=<span class="number">0.01</span>, .maxVal=<span class="number">15.0</span>},
+    {.name=<span class="string">"Volume Env Sustain"</span>, .x=<span class="number">433</span>, .y=<span class="number">61</span>, .defaultVal=<span class="number">0.1</span>, .minVal=<span class="number">0.001</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"Volume Env Release"</span>, .x=<span class="number">488</span>, .y=<span class="number">61</span>, .defaultVal=<span class="number">1.0</span>, .minVal=<span class="number">0.01</span>, .maxVal=<span class="number">15.0</span>},
+    {.name=<span class="string">"Filter Env Attack"</span>, .x=<span class="number">323</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">0.01</span>, .minVal=<span class="number">0.01</span>, .maxVal=<span class="number">10.0</span>},
+    {.name=<span class="string">"Filter Env Decay"</span>, .x=<span class="number">378</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">0.5</span>, .minVal=<span class="number">0.01</span>, .maxVal=<span class="number">15.0</span>},
+    {.name=<span class="string">"Filter Env Sustain"</span>, .x=<span class="number">433</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">0.1</span>, .minVal=<span class="number">0.001</span>, .maxVal=<span class="number">1.0</span>},
+    {.name=<span class="string">"Filter Env Release"</span>, .x=<span class="number">488</span>, .y=<span class="number">174</span>, .defaultVal=<span class="number">1.0</span>, .minVal=<span class="number">0.01</span>, .maxVal=<span class="number">15.0</span>}
+};
+</code></pre> <p>What a monster! The <code>{}</code> brace syntax is (relatively) newschool C/C++ and is called a <a href="http://www.drdobbs.com/the-new-c-compound-literals/184401404">compound literal</a>. Basically you can initialize <code>struct</code>s and C arrays like this. So the outer braces initialize the <code>parameterProperties[]</code> array. They contain a comma-separated list of compound literals. Each of these initializes one <code>parameterProperties_struct</code>. Let’s look at the first of&nbsp;them:</p> <pre><code class="lang-cpp">{.name=<span class="string">"Osc 1 Waveform"</span>, .x=<span class="number">30</span>, .y=<span class="number">75</span>}
+</code></pre> <p>In oldschool C, we’d have to write&nbsp;this:</p> <pre><code class="lang-cpp">parameterProperties_struct* osc1Waveform_prop = parameterProperties[mOsc1Waveform];
+osc1Waveform_prop-&gt;name = <span class="string">"Osc 1 Waveform"</span>;
+osc1Waveform_prop-&gt;x = <span class="number">30</span>;
+osc1Waveform_prop-&gt;y = <span class="number">75</span>;
+</code></pre> <p>And we’d have to do that for each parameter!<br>The “classic” way to use compound literals for <code>struct</code>s&nbsp;is:</p> <pre><code class="lang-cpp">{<span class="string">"Osc 1 Waveform"</span>, <span class="number">30</span>, <span class="number">75</span>}
+</code></pre> <p>Okay, this is nice and short, but also error-prone. If we add something to the beginning of <code>struct</code> or change the order of members, we’ll be in trouble. A better way (though it’s more code to type) is to use <a href="http://gcc.gnu.org/onlinedocs/gcc/Designated-Inits.html">designated initializers</a>. This just means accessing <code>struct</code> members with the <code>.membername=</code> notation. It gives us the final form, which looks a little like <a href="http://en.wikipedia.org/wiki/JSON#Data_types.2C_syntax_and_example"><span class=caps>JSON</span></a> or <a href="http://www.ruby-doc.org/core-2.0.0/Hash.html">Ruby Hashes</a>:</p> <pre><code class="lang-cpp">{.name=<span class="string">"Osc 1 Waveform"</span>, .x=<span class="number">30</span>, .y=<span class="number">75</span>}
+</code></pre> <h2 id=creating-the-parameters>Creating the&nbsp;Parameters</h2> <p>We have added the two member functions <code>CreateParams</code> and <code>CreateGraphics</code>. Our constructor now becomes very&nbsp;simple:</p> <pre><code class="lang-cpp">SpaceBass::SpaceBass(IPlugInstanceInfo instanceInfo) :
+    IPLUG_CTOR(kNumParams, kNumPrograms, instanceInfo),
+    lastVirtualKeyboardNoteNumber(virtualKeyboardMinimumNoteNumber - <span class="number">1</span>)
+{
+    <span class="caps">TRACE</span>;
+
+    CreateParams();
+    CreateGraphics();
+    CreatePresets();
+
+    mMIDIReceiver.noteOn.Connect(<span class="keyword">this</span>, &amp;SpaceBass::onNoteOn);
+    mMIDIReceiver.noteOff.Connect(<span class="keyword">this</span>, &amp;SpaceBass::onNoteOff);
+    mEnvelopeGenerator.beganEnvelopeCycle.Connect(<span class="keyword">this</span>, &amp;SpaceBass::onBeganEnvelopeCycle);
+    mEnvelopeGenerator.finishedEnvelopeCycle.Connect(<span class="keyword">this</span>, &amp;SpaceBass::onFinishedEnvelopeCycle);
+}
+</code></pre> <p>Pretty straightforward, isn’t it? Instead of doing the <code>GetParam()</code> and <code>pGraphics</code> stuff here, we’re moving it out.<br>Let’s implement <code>CreateParams</code>!</p> <pre><code class="lang-cpp"><span class="keyword">void</span> SpaceBass::CreateParams() {
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; kNumParams; i++) {
+        IParam* param = GetParam(i);
+        <span class="keyword">const</span> parameterProperties_struct&amp; properties = parameterProperties[i];
+        <span class="keyword">switch</span> (i) {
+            <span class="comment">// Enum Parameters:</span>
+            <span class="keyword">case</span> mOsc1Waveform:
+            <span class="keyword">case</span> mOsc2Waveform:
+                param-&gt;InitEnum(properties.name,
+                    Oscillator::OSCILLATOR_MODE_SAW,
+                    Oscillator::kNumOscillatorModes);
+                <span class="comment">// For <span class="caps">VST3</span>:</span>
+                param-&gt;SetDisplayText(<span class="number">0</span>, properties.name);
+                <span class="keyword">break</span>;
+            <span class="keyword">case</span> mLFOWaveform:
+                param-&gt;InitEnum(properties.name,
+                    Oscillator::OSCILLATOR_MODE_TRIANGLE,
+                    Oscillator::kNumOscillatorModes);
+                <span class="comment">// For <span class="caps">VST3</span>:</span>
+                param-&gt;SetDisplayText(<span class="number">0</span>, properties.name);
+                <span class="keyword">break</span>;
+            <span class="keyword">case</span> mFilterMode:
+                param-&gt;InitEnum(properties.name,
+                    Filter::FILTER_MODE_LOWPASS,
+                    Filter::kNumFilterModes);
+                <span class="keyword">break</span>;
+            <span class="comment">// Double Parameters:</span>
+            <span class="keyword">default</span>:
+                param-&gt;InitDouble(properties.name,
+                    properties.defaultVal,
+                    properties.minVal,
+                    properties.maxVal,
+                    parameterStep);
+                <span class="keyword">break</span>;
+        }
+    }
+</code></pre> <p>So we’re iterating over all parameters. First we get the right properties from the data structure we just created. Then we use a <code>switch</code> to initialize the <code>enum</code> parameters differently. We decide that the <span class=caps>LFO</span> should default to the triangle waveform because that’s what LFOs use most of the time. Note how the default case is just one statement for all 16 knobs!<br>Some of the knobs need a non-linear behaviour. For example, the filter cutoff has a logarithmic behaviour due to how octaves and frequencies work. Let’s add the appropriate <code>SetShape</code> calls at the bottom of <code>CreateParams</code>:</p> <pre><code class="lang-cpp">    GetParam(mFilterCutoff)-&gt;SetShape(<span class="number">2</span>);
+    GetParam(mVolumeEnvAttack)-&gt;SetShape(<span class="number">3</span>);
+    GetParam(mFilterEnvAttack)-&gt;SetShape(<span class="number">3</span>);
+    GetParam(mVolumeEnvDecay)-&gt;SetShape(<span class="number">3</span>);
+    GetParam(mFilterEnvDecay)-&gt;SetShape(<span class="number">3</span>);
+    GetParam(mVolumeEnvSustain)-&gt;SetShape(<span class="number">2</span>);
+    GetParam(mFilterEnvSustain)-&gt;SetShape(<span class="number">2</span>);
+    GetParam(mVolumeEnvRelease)-&gt;SetShape(<span class="number">3</span>);
+    GetParam(mFilterEnvRelease)-&gt;SetShape(<span class="number">3</span>);
+</code></pre> <p>And finally, we’re going to call <code>OnParamChange</code> for every parameter once, so the plugin has the right internal values when it’s first&nbsp;loaded:</p> <pre><code class="lang-cpp">    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; kNumParams; i++) {
+        OnParamChange(i);
+    }
+}
+</code></pre> <p>We’re now done creating the internal parameters. Let’s add <span class=caps>GUI</span> controls for each of them. This is done in <code>CreateGraphics</code>. First, we’re going to add the background&nbsp;image:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> SpaceBass::CreateGraphics() {
+    IGraphics* pGraphics = MakeGraphics(<span class="keyword">this</span>, kWidth, kHeight);
+    pGraphics-&gt;AttachBackground(BG_ID, BG_FN);
+</code></pre> <p>Then the virtual&nbsp;keyboard:</p> <pre><code class="lang-cpp">    IBitmap whiteKeyImage = pGraphics-&gt;LoadIBitmap(WHITE_KEY_ID, WHITE_KEY_FN, <span class="number">6</span>);
+    IBitmap blackKeyImage = pGraphics-&gt;LoadIBitmap(BLACK_KEY_ID, BLACK_KEY_FN);
+    <span class="comment">//                            C#     D#          F#      G#      A#</span>
+    <span class="keyword">int</span> keyCoordinates[<span class="number">12</span>] = { <span class="number">0</span>, <span class="number">10</span>, <span class="number">17</span>, <span class="number">30</span>, <span class="number">35</span>, <span class="number">52</span>, <span class="number">61</span>, <span class="number">68</span>, <span class="number">79</span>, <span class="number">85</span>, <span class="number">97</span>, <span class="number">102</span> };
+    mVirtualKeyboard = <span class="keyword">new</span> IKeyboardControl(<span class="keyword">this</span>, kKeybX, kKeybY, virtualKeyboardMinimumNoteNumber, <span class="comment">/* octaves: */</span> <span class="number">4</span>, &amp;whiteKeyImage, &amp;blackKeyImage, keyCoordinates);
+    pGraphics-&gt;AttachControl(mVirtualKeyboard);
+</code></pre> <p>The only thing that has changed about the virtual keyboard is the number of octaves (now only four) and the <code>keyCoordinates</code>. Our keys are wider than before, so we have to adjust the spacing to make the keys appear at the right coordinates.<br>Below that, load the knob and switch&nbsp;graphics:</p> <pre><code class="lang-cpp">    IBitmap waveformBitmap = pGraphics-&gt;LoadIBitmap(WAVEFORM_ID, WAVEFORM_FN, <span class="number">4</span>);
+    IBitmap filterModeBitmap = pGraphics-&gt;LoadIBitmap(FILTERMODE_ID, FILTERMODE_FN, <span class="number">3</span>);
+    IBitmap knobBitmap = pGraphics-&gt;LoadIBitmap(KNOB_ID, KNOB_FN, <span class="number">64</span>);
+</code></pre> <p>Here we’re just loading the <em>.png</em> files, and we tell the system how many frames each of them has.<br>The main part is to iterate over all parameters and to create the appropriate <span class=caps>GUI</span>&nbsp;control:</p> <pre><code class="lang-cpp">    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; kNumParams; i++) {
+        <span class="keyword">const</span> parameterProperties_struct&amp; properties = parameterProperties[i];
+        IControl* control;
+        IBitmap* graphic;
+        <span class="keyword">switch</span> (i) {
+            <span class="comment">// Switches:</span>
+            <span class="keyword">case</span> mOsc1Waveform:
+            <span class="keyword">case</span> mOsc2Waveform:
+            <span class="keyword">case</span> mLFOWaveform:
+                graphic = &amp;waveformBitmap;
+                control = <span class="keyword">new</span> ISwitchControl(<span class="keyword">this</span>, properties.x, properties.y, i, graphic);
+                <span class="keyword">break</span>;
+            <span class="keyword">case</span> mFilterMode:
+                graphic = &amp;filterModeBitmap;
+                control = <span class="keyword">new</span> ISwitchControl(<span class="keyword">this</span>, properties.x, properties.y, i, graphic);
+                <span class="keyword">break</span>;
+            <span class="comment">// Knobs:</span>
+            <span class="keyword">default</span>:
+                graphic = &amp;knobBitmap;
+                control = <span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, properties.x, properties.y, i, graphic);
+                <span class="keyword">break</span>;
+        }
+        pGraphics-&gt;AttachControl(control);
+    }
+</code></pre> <p>Just as above, we’re first getting the properties for the current parameter. In the <code>switch</code>, we treat our <code>ISwitchControl</code> parameters differently. We also have to use a different bitmap for our <code>mFilterMode</code> <span class=caps>GUI</span> control (so it uses <em>filtermode.png</em> instead of <em>waveform.png</em>. Again, the <code>default</code> case is a normal knob (because most of our <span class=caps>GUI</span> controls are knobs).<br>Let’s finish the function body by calling <code>AttachGraphics</code>:</p> <pre><code class="lang-cpp">    AttachGraphics(pGraphics);
+}
+</code></pre> <p>Finally, delete the <code>switch</code> statement from <code>OnParamChange()</code> (in <em>SpaceBass.cpp</em>). We’re going to replace it in the next&nbsp;part.</p> <h2 id=finished->Finished!</h2> <p>Run the plugin, and you should see our new <span class=caps>GUI</span> in all its glory! The audio portion doesn’t work correctly at this point, because we’re going to remake it in the <a href="/blog/articles/audio-plugins-016-polyphony/">next post</a>. We’re going to make the plugin&nbsp;polyphonic!</p> <p>You can download what we’ve done in this part <a href="/blog/articles/audio-plugins-015-redesign/source.zip">here</a>.</p> </section> </article> <div id=donation_prompt>If you found this useful, please feel free to <form action="https://www.paypal.com/cgi-bin/webscr" method=post target=_top class=donation-form> <input type=hidden name=cmd value=_s-xclick> <input type=hidden name=hosted_button_id value=JQDU8W5PJBWL6> <input type=hidden name=ref value="/blog/articles/audio-plugins-015-redesign/"> <input type=image src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif" border=0 name=submit alt="PayPal - The safer, easier way to pay online!"><img alt="" border=0 src="https://www.paypalobjects.com/de_DE/i/scr/pixel.gif" width=1 height=1> </form>! </div> <iframe src="//www.facebook.com/plugins/like.php?href=http%3A%2F%2Fwww.martin-finke.de%2Fblog%2F&amp;width=450&amp;height=21&amp;colorscheme=light&amp;layout=button_count&amp;action=like&amp;show_faces=false&amp;send=false" scrolling=no frameborder=0 style="border: none; overflow: hidden; width: 200px; height: 21px;" allowtransparency=true></iframe> <div class=comments> <div id=disqus_thread></div> <script type="text/javascript">var disqus_shortname="martinfinke";(function(){var a=document.createElement("script");a.type="text/javascript";a.async=true;a.src="//"+disqus_shortname+".disqus.com/embed.js";(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(a)})();</script> <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript> <a href="http://disqus.com" class=dsq-brlink>comments powered by <span class=logo-disqus>| Disqus</span></a> </div> </div> </div> <footer> <div class=content-wrap> <div class=nav><a href="/blog/">« Index</a></div> <section class=copy> <p>&copy; 2015 Martin Finke – <a href="/blog/impressum.html" class=impressum-link>Impressum</a></p> </section> </div> </footer> <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script> <script>window.jQuery||document.write('<script src="/blog/js/vendor/jquery-1.10.2.min.js"><\/script>');</script> <script type="text/javascript">$(document).ready(function(){$('a:link[href^=http]:not([href*="martin-finke.de"])').attr("target","_blank")});</script> <script type="text/javascript">var _gaq=_gaq||[];_gaq.push(["_setAccount","UA-43375106-1"]);_gaq.push(["_trackPageview"]);(function(){var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src=("https:"==document.location.protocol?"https://":"http://")+"stats.g.doubleclick.net/dc.js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(b,a)})();</script> </body> </html>

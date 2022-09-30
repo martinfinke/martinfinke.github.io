@@ -1,0 +1,164 @@
+<!DOCTYPE html> <html lang=en> <head> <meta charset=utf-8> <meta http-equiv=X-UA-Compatible content="IE=edge,chrome=1"> <meta name=HandheldFriendly content=True> <meta name=MobileOptimized content=320> <meta name=viewport content="width=device-width"> <meta http-equiv=cleartype content=on> <meta property="fb:admins" content=100001493355877> <meta property="og:image" content="http://www.martin-finke.de/blog/img/making_audio_plugins_thumbnail.png"> <meta property="og:image:type" content="image/png"> <meta property="og:image:width" content=100> <meta property="og:image:height" content=100> <title>Making Audio Plugins Part 8: Synthesizing Waveforms - Martin Finke's Blog </title> <link rel=alternate href="/blog/feed.xml" type="application/rss+xml" title="Music &amp; Programming"> <link href="http://fonts.googleapis.com/css?family=Domine:700|Inconsolata:400,700" rel=stylesheet type="text/css"> <link rel=stylesheet href='/blog/css/4407aa6.css'> </head> <body class=article-detail> <header class=header> <div class=content-wrap> <h1>Making Audio Plugins Part 8: Synthesizing Waveforms</h1> <div class=taglinks><a href="/blog/tags/programming.html" class=taglink>Programming</a>, <a href="/blog/tags/dsp.html" class=taglink>DSP</a>, <a href="/blog/tags/making_audio_plugins.html" class=taglink>Making Audio Plugins</a> </div> </div> </header> <div id=content> <div class=content-wrap> <article class=article> <section class=content><p>After all this <span class=caps>GUI</span> stuff it’s time for some audio programming. First we’ll generate the classic <em>Sine</em>, <em>Saw</em>, <em>Square</em> and <em>Triangle</em> waveforms. <span class=more></span><br>Let’s begin by running the <em>duplicate</em> script:</p> <pre><code>./duplicate.py DigitalDistortion/ Synthesis YourName
+</code></pre><p>Again, you’ll have to go to <em>Product</em> → <em>Scheme</em> → <em>Edit Scheme…</em> and change <em>“Run”</em> so that it starts <em><span class=caps>REAPER64</span>.app</em> with your <em>reaper-project.<span class=caps>RPP</span></em> (as <a href="/blog/articles/audio-plugins-004-vst-and-au/#edit_scheme">described earlier</a>). If Reaper complains about the <span class=caps>AU</span> not being found, change the names and IDs in <em>resource.h</em>, or remove the <em>DigitalDistortion.component</em>.</p> <h2 id=creating-the-oscillator-class>Creating the Oscillator&nbsp;Class</h2> <p>All of this will be about <span class=caps>DSP</span>, but we will not just write our code into the <code>ProcessDoubleReplacing</code> function. Instead, we will create an <code>Oscillator</code> class. It will be called from <code>ProcessDoubleReplacing</code> and will fill buffers with <code>double</code> values for the current waveform. To generate the waveforms, we’ll first take the most intuitive approach. We will then see the disadvantages and find a better-sounding way.<br>Create a new Class by going to <em>File</em> → <em>New</em> → <em>File…</em>:</p> <p><a href="/blog/articles/audio-plugins-008-synthesizing-waveforms/create-cpp-class.jpg"><img src="/blog/articles/audio-plugins-008-synthesizing-waveforms/create-cpp-class.jpg" alt=""></a></p> <p>Call it <em>Oscillator</em>.<br><a name=compile_sources></a> Now make sure <em>Oscillator.cpp</em> gets compiled when we build. Go to your project settings, select a target (e.g. <em><span class=caps>AU</span></em>) and click <em>Build Phases</em>. Click the plus button below <em>Compile Sources</em> and add the <em>.cpp</em> file (you’ll have to do this for every target you&nbsp;need):</p> <p><a href="/blog/articles/audio-plugins-008-synthesizing-waveforms/compile-sources.png"><img src="/blog/articles/audio-plugins-008-synthesizing-waveforms/compile-sources.png" alt=""></a></p> <p>Let’s write the header first. Put this between the <code>#define</code> and <code>#endif</code> in <em>Oscillator.h</em>:</p> <pre><code class="lang-cpp"><span class="preprocessor">#include &lt;math.h&gt;</span>
+
+<span class="keyword">enum</span> OscillatorMode {
+    OSCILLATOR_MODE_SINE,
+    OSCILLATOR_MODE_SAW,
+    OSCILLATOR_MODE_SQUARE,
+    OSCILLATOR_MODE_TRIANGLE
+};
+
+<span class="keyword">class</span> Oscillator {
+<span class="keyword">private</span>:
+    OscillatorMode mOscillatorMode;
+    <span class="keyword">const</span> <span class="keyword">double</span> mPI;
+    <span class="keyword">double</span> mFrequency;
+    <span class="keyword">double</span> mPhase;
+    <span class="keyword">double</span> mSampleRate;
+    <span class="keyword">double</span> mPhaseIncrement;
+    <span class="keyword">void</span> updateIncrement();
+<span class="keyword">public</span>:
+    <span class="keyword">void</span> setMode(OscillatorMode mode);
+    <span class="keyword">void</span> setFrequency(<span class="keyword">double</span> frequency);
+    <span class="keyword">void</span> setSampleRate(<span class="keyword">double</span> sampleRate);
+    <span class="keyword">void</span> generate(<span class="keyword">double</span>* buffer, <span class="keyword">int</span> nFrames);
+    Oscillator() :
+        mOscillatorMode(OSCILLATOR_MODE_SINE),
+        mPI(<span class="number">2</span>*<span class="built_in">acos</span>(<span class="number">0.0</span>)),
+        mFrequency(<span class="number">440.0</span>),
+        mPhase(<span class="number">0.0</span>),
+        mSampleRate(<span class="number">44100.0</span>) { updateIncrement(); };
+};
+</code></pre> <p>We are using an <code>enum</code> to indicate which waveform the oscillator is generating. Here it defaults to a sine wave, but this can be changed using the <code>setMode</code> member function. Calculating π this way is more portable than using the <code>M_PI</code> constant.<br>The Oscillator stores the frequency, phase and sample rate. Just to be clear, the phase is the value that will change all the time to indicate <em>where in the waveform cycle the oscillator currently is</em>. The phase increment is the amount that’s added to the phase every sample.<br>Finally, there’s more setter functions (for frequency and sample rate) and, most importantly, <code>generate</code>. This is the function that takes a buffer of doubles and fills it with sample&nbsp;values.</p> <p>Let’s add the implementation of the setter functions (in <em>Oscillator.cpp</em>):</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Oscillator::setMode(OscillatorMode mode) {
+    mOscillatorMode = mode;
+}
+
+<span class="keyword">void</span> Oscillator::setFrequency(<span class="keyword">double</span> frequency) {
+    mFrequency = frequency;
+    updateIncrement();
+}
+
+<span class="keyword">void</span> Oscillator::setSampleRate(<span class="keyword">double</span> sampleRate) {
+    mSampleRate = sampleRate;
+    updateIncrement();
+}
+
+<span class="keyword">void</span> Oscillator::updateIncrement() {
+    mPhaseIncrement = mFrequency * <span class="number">2</span> * mPI / mSampleRate;
+}
+</code></pre> <p>The <code>mPhaseIncrement</code> depends on both <code>mFrequency</code> and <code>mSampleRate</code>, so it has to be updated everytime one of the two is changed. We could calculate it every sample, but of course it’s far more efficient to do it here.<br>Add the implementation for <code>generate</code>:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Oscillator::generate(<span class="keyword">double</span>* buffer, <span class="keyword">int</span> nFrames) {
+    <span class="keyword">const</span> <span class="keyword">double</span> twoPI = <span class="number">2</span> * mPI;
+    <span class="keyword">switch</span> (mOscillatorMode) {
+        <span class="keyword">case</span> OSCILLATOR_MODE_SINE:
+            <span class="comment">// ...</span>
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> OSCILLATOR_MODE_SAW:
+            <span class="comment">// ...</span>
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> OSCILLATOR_MODE_SQUARE:
+            <span class="comment">// ...</span>
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> OSCILLATOR_MODE_TRIANGLE:
+            <span class="comment">// ...</span>
+            <span class="keyword">break</span>;
+    }
+}
+</code></pre> <p>This function will be called everytime <code>ProcessDoubleReplacing</code> is called. We’re using a <code>switch</code> to use the right code for whatever waveform is currently&nbsp;selected.</p> <h2 id=generating-waveforms>Generating&nbsp;Waveforms</h2> <p>The code for generating a sine wave is quite&nbsp;simple:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> OSCILLATOR_MODE_SINE:
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; nFrames; i++) {
+        buffer[i] = <span class="built_in">sin</span>(mPhase);
+        mPhase += mPhaseIncrement;
+        <span class="keyword">while</span> (mPhase &gt;= twoPI) {
+            mPhase -= twoPI;
+        }
+    }
+    <span class="keyword">break</span>;
+</code></pre> <p>Note that we’re not working with <code>mFrequency</code> and <code>mSampleRate</code> here. We’re just incrementing <code>mPhase</code> and make sure it stays between <code>0</code> and <code>twoPI</code>. The only more complex operation is the call to the C <code>sin()</code> function, which on many systems will be calculated on a hardware&nbsp;level.</p> <p>Here’s the code for the saw&nbsp;wave:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> OSCILLATOR_MODE_SAW:
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; nFrames; i++) {
+        buffer[i] = <span class="number">1.0</span> - (<span class="number">2.0</span> * mPhase / twoPI);
+        mPhase += mPhaseIncrement;
+        <span class="keyword">while</span> (mPhase &gt;= twoPI) {
+            mPhase -= twoPI;
+        }
+    }
+    <span class="keyword">break</span>;
+</code></pre> <p>The interesting part is – again – the line of code that’s writing into the buffer. When I see formulas like these, I like to decompose&nbsp;them:</p> <ul> <li><code>mPhase</code> goes from <code>0</code> upwards, and jumps back to <code>0</code> when it reaches <code>twoPI</code>.</li> <li>So <code>(mPhase / twoPI)</code> goes from <code>0</code> upwards and jumps back to <code>0</code> when it reaches <code>1</code>.</li> <li>This means that <code>(2.0 * mPhase / twoPI)</code> goes from <code>0</code> up and jumps back at <code>2</code>.</li> <li>When <code>mPhase</code> is <code>0</code>, the expression <code>1.0 - (2.0 * mPhase / twoPI)</code> is <code>1</code>. While <code>mPhase</code> goes upwards, the expression goes <em>downwards</em> and jumps back to <code>1</code> when it reaches <code>-1</code>.</li> </ul> <p>So we have a downwards saw wave!<br>The lower part that’s dealing with <code>mPhase</code> is duplication that could be avoided, but in that case we would have to take the <code>switch</code> statement into the loop. This would also prevent duplicating the <code>for</code> statement, but the code would <code>switch</code> more often than neccessary.<br>In most programming scenarios, we would prefer brevity and readability over performance. <span class=caps>DSP</span> code that’s executed 44100 or 96000 times per second <em>can</em> be an exception to this rule. But be aware that the compiler will optimize a lot behind the scenes and what feels like <em>“a lot of work”</em> to you (the programmer), may be very trivial compared to other areas you’re not thinking&nbsp;about.</p> <p>Next is the square&nbsp;wave:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> OSCILLATOR_MODE_SQUARE:
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; nFrames; i++) {
+        <span class="keyword">if</span> (mPhase &lt;= mPI) {
+            buffer[i] = <span class="number">1.0</span>;
+        } <span class="keyword">else</span> {
+            buffer[i] = -<span class="number">1.0</span>;
+        }
+        mPhase += mPhaseIncrement;
+        <span class="keyword">while</span> (mPhase &gt;= twoPI) {
+            mPhase -= twoPI;
+        }
+    }
+    <span class="keyword">break</span>;
+</code></pre> <p>You’re already familiar with the lower part. Every cycle is <code>twoPI</code> long, so the <code>if</code> statement causes the first half of every cycle to have values of <code>1</code>, and the second half to have values of <code>-1</code>. So there’s a very sudden jump when <code>mPhase</code> becomes greater than <code>mPI</code>. That’s a square&nbsp;wave.</p> <p>The triangle wave is just a little more&nbsp;complex:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> OSCILLATOR_MODE_TRIANGLE:
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; nFrames; i++) {
+        <span class="keyword">double</span> value = -<span class="number">1.0</span> + (<span class="number">2.0</span> * mPhase / twoPI);
+        buffer[i] = <span class="number">2.0</span> * (<span class="built_in">fabs</span>(value) - <span class="number">0.5</span>);
+        mPhase += mPhaseIncrement;
+        <span class="keyword">while</span> (mPhase &gt;= twoPI) {
+            mPhase -= twoPI;
+        }
+    }
+    <span class="keyword">break</span>;
+</code></pre> <p>If you decompose <code>-1.0 + (2.0 * mPhase / twoPI)</code> like I did above, you’ll notice that it’s the <em>inverse</em> of the above saw wave: It’s an <em>upwards</em> saw wave.<br>Let’s go from here: Taking absolute values (<code>fabs</code>) of the upwards saw wave means that all values below <code>0</code> will be <em>inverted</em> (flipped around the <em>x</em> axis). This means that the values will go up and down. Subtracting <code>0.5</code> centers the waveform around <code>0</code>. Multiplying by <code>2.0</code> makes the values go between <code>-1</code> to <code>+1</code>. We have a triangle&nbsp;wave.</p> <p>Let’s use our oscillator! Include <em>Oscillator.h</em> and add an <code>Oscillator</code> member to your <code>Synthesis</code> class:</p> <pre><code class="lang-cpp"><span class="comment">// ...</span>
+<span class="preprocessor">#include "Oscillator.h"</span>
+
+<span class="keyword">class</span> Synthesis : <span class="keyword">public</span> IPlug
+{
+<span class="comment">// ...</span>
+<span class="keyword">private</span>:
+    <span class="keyword">double</span> mFrequency;
+    <span class="keyword">void</span> CreatePresets();
+    Oscillator mOscillator;
+};
+</code></pre> <p>We also renamed <code>mThreshold</code> to <code>mFrequency</code>.<br>In <em>Synthesis.cpp</em>, rename all instances of <code>Threshold</code> with <code>Frequency</code>. Now change the parameter initialization inside the&nbsp;constructor:</p> <pre><code class="lang-cpp">GetParam(kFrequency)-&gt;InitDouble(<span class="string">"Frequency"</span>, <span class="number">440.0</span>, <span class="number">50.0</span>, <span class="number">20000.0</span>, <span class="number">0.01</span>, <span class="string">"Hz"</span>);
+GetParam(kFrequency)-&gt;SetShape(<span class="number">2.0</span>);
+</code></pre> <p>We’re re-using the knob for testing our class. We’ll be able to change the oscillator’s frequency between 50 Hz and 20 kHz (the default will be 440 Hz).<br>Change the <code>createPresets</code> member&nbsp;function:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::CreatePresets() {
+  MakePreset(<span class="string">"clean"</span>, <span class="number">440.0</span>);
+}
+</code></pre> <p>Inside <code>Reset</code>, we have to tell the oscillator what sample rate is being&nbsp;used:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::Reset()
+{
+  <span class="caps">TRACE</span>;
+  IMutexLock lock(<span class="keyword">this</span>);
+  mOscillator.setSampleRate(GetSampleRate());
+}
+</code></pre> <p>If we didn’t do this and the oscillator had the wrong sample rate, it would still generate the same waveforms, but at the wrong frequencies. <code>GetSampleRate</code> is a member function that’s inherited from the <code>IPlugBase</code> class.</p> <p>We have to edit <code>OnParamChange</code> as well, so the oscillator’s frequency can be changed using the&nbsp;knob.</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::OnParamChange(<span class="keyword">int</span> paramIdx)
+{
+  IMutexLock lock(<span class="keyword">this</span>);
+
+  <span class="keyword">switch</span> (paramIdx)
+  {
+    <span class="keyword">case</span> kFrequency:
+      mOscillator.setFrequency(GetParam(kFrequency)-&gt;Value());
+      <span class="keyword">break</span>;
+
+    <span class="keyword">default</span>:
+      <span class="keyword">break</span>;
+  }
+}
+</code></pre> <p>Finally, <code>ProcessDoubleReplacing</code> has to use the&nbsp;oscillator:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::ProcessDoubleReplacing(<span class="keyword">double</span>** inputs,
+                <span class="keyword">double</span>** outputs,
+                <span class="keyword">int</span> nFrames) {
+  <span class="comment">// Mutex is already locked for us.</span>
+
+  <span class="keyword">double</span> *leftOutput = outputs[<span class="number">0</span>];
+  <span class="keyword">double</span> *rightOutput = outputs[<span class="number">1</span>];
+
+  mOscillator.generate(leftOutput, nFrames);
+
+  <span class="comment">// Copy left buffer into right buffer:</span>
+  <span class="keyword">for</span> (<span class="keyword">int</span> s = <span class="number">0</span>; s &lt; nFrames; ++s) {
+    rightOutput[s] = leftOutput[s];
+  }
+}
+</code></pre> <p>Basically we’re letting <code>mOscillator</code> fill the left channel buffer. Then we copy everything into the right channel buffer.<br>Let’s hear how it sounds! Run the <em><span class=caps>VST2</span></em> or <em><span class=caps>AU</span></em> target. If you get linker errors, make sure you <a href="/blog/articles/audio-plugins-008-synthesizing-waveforms/#compile_sources">added <em>Oscillator.cpp</em> to the <em>Compile Sources</em> phase</a>.<br>Once it’s running, you’ll hear a steady tone. Turn the knob and the frequency will change. Now change the initial value of <code>mOscillatorMode</code> in <em>Oscillator.h</em>, by modifying the constructor’s initializer&nbsp;list:</p> <pre><code class="lang-cpp">Oscillator() :
+    mOscillatorMode(OSCILLATOR_MODE_SAW),
+    mPI(<span class="number">2</span>*<span class="built_in">acos</span>(<span class="number">0.0</span>)),
+    mFrequency(<span class="number">440.0</span>),
+    mPhase(<span class="number">0.0</span>),
+    mSampleRate(<span class="number">44100.0</span>) { updateIncrement(); };
+</code></pre> <p>Run again and you’ll hear a sharper tone. Try <code>OSCILLATOR_MODE_SQUARE</code> and <code>OSCILLATOR_MODE_TRIANGLE</code>, too. Note the different timbres and turn the frequency knob. For all waveforms except the sine, you’ll hear that once you get into high frequencies, strange noises appear. There are additional tones, even below the base frequency. They sound inharmonic and when you turn the knob up and down, <em>they move in the opposite direction</em>!</p> <p><a name=aliasing></a></p> <h2 id=aliasing>Aliasing</h2> <p>If you look at the code for the square wave, you’ll notice that every time <code>mPhase</code> becomes greater than <code>mPI</code>, the waveform will jump from the positive max to the negative max, all from one sample to the next. The opposite jump happens when <code>twoPI</code> is subtracted from mPhase and it becomes less than <code>mPI</code> again. Generally, sudden jumps in a waveform mean that there’s a lot of high frequency content. Imagine somebody told you to <em>construct this jump using as many sine waves as you like, but only sine waves</em>. Given the generally round shape of sine waves, you can imagine how you’d need a lot of sine waves with a very high frequency. You actually need an infinite number of sine waves with frequencies going towards infinity to create a perfect square, saw or triangle&nbsp;wave.</p> <p>In computers, everything is <em>finite</em>. You have a limited amount of disk space and <span class=caps>RAM</span>, so when you record one second of audio, your computer can only use a finite number of values to save it. This number (called the <em>Sample Rate</em>) can be any value, but is often 44100, 48000 or 96000 samples per second. An audio signal stored using a finite number of samples per second is called <a href="http://en.wikipedia.org/wiki/Discrete_signal">discrete</a>.<br>To describe a signal that’s oscillating between +1 and -1, you need <em>at the very least</em> two samples per cycle: one with the value +1 and one with the value -1. So if you have 44100 samples per second, the maximum frequency you can describe is 22050 Hz (see <a href="http://en.wikipedia.org/wiki/Nyquist_frequency">Nyquist frequency</a>).</p> <p>So, it’s not possible to describe a perfect square, saw or triangle wave in a discrete time signal. If we try to do it (by generating the sharp jumps in the waveform), we will get <a href="https://en.wikipedia.org/wiki/Aliasing">aliasing effects</a>. For more information, click <a href="http://www.dspguide.com/ch3/2.htm">here</a>.</p> <p>How can we generate <em>the best, alias-free wave for a given sample rate</em>? <em>“Best”</em> meaning <em>“closest to the shape we calculated above”</em>.<br>The Nyquist frequency is a constraint that’s expressed in the frequency domain. It doesn’t say <em>“Your waveform shouldn’t have spikes that are steeper than X”</em>. It says <em>“Your signal shouldn’t have frequencies above X Hz”</em>. So we need to shift our work to the frequency domain. We will do that in a <a href="/blog/articles/audio-plugins-018-polyblep-oscillator/">future post</a>, but in the next post we’ll look at how we can <a href="/blog/articles/audio-plugins-009-receiving-midi/">receive incoming <span class=caps>MIDI</span>&nbsp;data</a>.</p> <p>You can download the code we’ve created so far <a href="/blog/articles/audio-plugins-008-synthesizing-waveforms/source.zip">here</a>.</p> </section> </article> <div id=donation_prompt>If you found this useful, please feel free to <form action="https://www.paypal.com/cgi-bin/webscr" method=post target=_top class=donation-form> <input type=hidden name=cmd value=_s-xclick> <input type=hidden name=hosted_button_id value=JQDU8W5PJBWL6> <input type=hidden name=ref value="/blog/articles/audio-plugins-008-synthesizing-waveforms/"> <input type=image src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif" border=0 name=submit alt="PayPal - The safer, easier way to pay online!"><img alt="" border=0 src="https://www.paypalobjects.com/de_DE/i/scr/pixel.gif" width=1 height=1> </form>! </div> <iframe src="//www.facebook.com/plugins/like.php?href=http%3A%2F%2Fwww.martin-finke.de%2Fblog%2F&amp;width=450&amp;height=21&amp;colorscheme=light&amp;layout=button_count&amp;action=like&amp;show_faces=false&amp;send=false" scrolling=no frameborder=0 style="border: none; overflow: hidden; width: 200px; height: 21px;" allowtransparency=true></iframe> <div class=comments> <div id=disqus_thread></div> <script type="text/javascript">var disqus_shortname="martinfinke";(function(){var a=document.createElement("script");a.type="text/javascript";a.async=true;a.src="//"+disqus_shortname+".disqus.com/embed.js";(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(a)})();</script> <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript> <a href="http://disqus.com" class=dsq-brlink>comments powered by <span class=logo-disqus>| Disqus</span></a> </div> </div> </div> <footer> <div class=content-wrap> <div class=nav><a href="/blog/">« Index</a></div> <section class=copy> <p>&copy; 2015 Martin Finke – <a href="/blog/impressum.html" class=impressum-link>Impressum</a></p> </section> </div> </footer> <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script> <script>window.jQuery||document.write('<script src="/blog/js/vendor/jquery-1.10.2.min.js"><\/script>');</script> <script type="text/javascript">$(document).ready(function(){$('a:link[href^=http]:not([href*="martin-finke.de"])').attr("target","_blank")});</script> <script type="text/javascript">var _gaq=_gaq||[];_gaq.push(["_setAccount","UA-43375106-1"]);_gaq.push(["_trackPageview"]);(function(){var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src=("https:"==document.location.protocol?"https://":"http://")+"stats.g.doubleclick.net/dc.js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(b,a)})();</script> </body> </html>

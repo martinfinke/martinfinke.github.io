@@ -1,0 +1,212 @@
+<!DOCTYPE html> <html lang=en> <head> <meta charset=utf-8> <meta http-equiv=X-UA-Compatible content="IE=edge,chrome=1"> <meta name=HandheldFriendly content=True> <meta name=MobileOptimized content=320> <meta name=viewport content="width=device-width"> <meta http-equiv=cleartype content=on> <meta property="fb:admins" content=100001493355877> <meta property="og:image" content="http://www.martin-finke.de/blog/img/making_audio_plugins_thumbnail.png"> <meta property="og:image:type" content="image/png"> <meta property="og:image:width" content=100> <meta property="og:image:height" content=100> <title>Making Audio Plugins Part 9: Receiving MIDI - Martin Finke's Blog </title> <link rel=alternate href="/blog/feed.xml" type="application/rss+xml" title="Music &amp; Programming"> <link href="http://fonts.googleapis.com/css?family=Domine:700|Inconsolata:400,700" rel=stylesheet type="text/css"> <link rel=stylesheet href='/blog/css/4407aa6.css'> </head> <body class=article-detail> <header class=header> <div class=content-wrap> <h1>Making Audio Plugins Part 9: Receiving MIDI</h1> <div class=taglinks><a href="/blog/tags/programming.html" class=taglink>Programming</a>, <a href="/blog/tags/dsp.html" class=taglink>DSP</a>, <a href="/blog/tags/making_audio_plugins.html" class=taglink>Making Audio Plugins</a> </div> </div> </header> <div id=content> <div class=content-wrap> <article class=article> <section class=content><p>So far we’ve been generating a steady waveform that keeps playing. Let’s see how we can react to <span class=caps>MIDI</span> and start/stop the waveform at the right pitch according to the notes we’re receiving. <span class=more></span></p> <h2 id=midi-handling-basics><span class=caps>MIDI</span> Handling&nbsp;Basics</h2> <p>When our plugin is loaded into a host, it receives all <span class=caps>MIDI</span> data on the track it is on. When a note is played or released, the plugin’s <code>ProcessMidiMsg</code> member function is called. It doesn’t matter if the note was played on a <span class=caps>MIDI</span> keyboard or it came from a piano roll. And it’s not just for key presses, but also for things like Pitch Bend or <a href="http://en.wikipedia.org/wiki/General_MIDI#Controller_events">Control Changes (<span class=caps>CC</span>)</a> (e.g. when there’s automation for a plugin parameter). The <code>ProcessMidiMsg</code> function is passed an <code>IMidiMsg</code>, which describes the <span class=caps>MIDI</span> event in a normalized, format-independent way. It has member functions like <code>NoteNumber</code> and <code>Velocity</code>. We’re going to use these to find out at what pitch and volume our oscillator will&nbsp;play.</p> <p>Whenever a <span class=caps>MIDI</span> message is received, the system is already playing back an audio buffer that was generated previously. There’s no way to <em>push</em> some audio to the system just at the moment when <span class=caps>MIDI</span> data arrives. We have to remember what happened until <code>ProcessDoubleReplacing</code> is called again. We also need the time when each message arrived, so that we can keep the timing intact when we’re generating the next audio&nbsp;buffer.</p> <p>The <a href="https://github.com/olilarkin/wdl-ol/blob/master/WDL/IPlug/IMidiQueue.h"><code>IMidiQueue</code></a> is the right tool for&nbsp;this.</p> <h2 id=creating-a-midi-receiver>Creating a <span class=caps>MIDI</span>&nbsp;Receiver</h2> <p>We’re going to reuse our <em>Synthesis</em> project. If you’re using version control, this may be a good time to commit. Create a new class <em>MIDIReceiver</em> and make sure the <em>.cpp</em> file is compiled with each target. Put the interface between <code>#define</code> and <code>#endif</code> in <em>MIDIReceiver.h</em>: <a name=midi_receiver_class></a></p> <pre><code class="lang-cpp"><span class="preprocessor">#pragma clang diagnostic push</span>
+<span class="preprocessor">#pragma clang diagnostic ignored "-Wextra-tokens"</span>
+<span class="preprocessor">#include "IPlug_include_in_plug_hdr.h"</span>
+<span class="preprocessor">#pragma clang diagnostic pop</span>
+
+<span class="preprocessor">#include "IMidiQueue.h"</span>
+
+<span class="keyword">class</span> MIDIReceiver {
+<span class="keyword">private</span>:
+    IMidiQueue mMidiQueue;
+    <span class="keyword">static</span> <span class="keyword">const</span> <span class="keyword">int</span> keyCount = <span class="number">128</span>;
+    <span class="keyword">int</span> mNumKeys; <span class="comment">// how many keys are being played at the moment (via midi)</span>
+    <span class="keyword">bool</span> mKeyStatus[keyCount]; <span class="comment">// array of on/off for each key (index is note number)</span>
+    <span class="keyword">int</span> mLastNoteNumber;
+    <span class="keyword">double</span> mLastFrequency;
+    <span class="keyword">int</span> mLastVelocity;
+    <span class="keyword">int</span> mOffset;
+    <span class="keyword">inline</span> <span class="keyword">double</span> noteNumberToFrequency(<span class="keyword">int</span> noteNumber) { <span class="keyword">return</span> <span class="number">440.0</span> * <span class="built_in">pow</span>(<span class="number">2.0</span>, (noteNumber - <span class="number">69.0</span>) / <span class="number">12.0</span>); }
+
+<span class="keyword">public</span>:
+    MIDIReceiver() :
+    mNumKeys(<span class="number">0</span>),
+    mLastNoteNumber(-<span class="number">1</span>),
+    mLastFrequency(-<span class="number">1.0</span>),
+    mLastVelocity(<span class="number">0</span>),
+    mOffset(<span class="number">0</span>) {
+        <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; keyCount; i++) {
+            mKeyStatus[i] = <span class="keyword">false</span>;
+        }
+    };
+
+    <span class="comment">// Returns true if the key with a given index is currently pressed</span>
+    <span class="keyword">inline</span> <span class="keyword">bool</span> getKeyStatus(<span class="keyword">int</span> keyIndex) <span class="keyword">const</span> { <span class="keyword">return</span> mKeyStatus[keyIndex]; }
+    <span class="comment">// Returns the number of keys currently pressed</span>
+    <span class="keyword">inline</span> <span class="keyword">int</span> getNumKeys() <span class="keyword">const</span> { <span class="keyword">return</span> mNumKeys; }
+    <span class="comment">// Returns the last pressed note number</span>
+    <span class="keyword">inline</span> <span class="keyword">int</span> getLastNoteNumber() <span class="keyword">const</span> { <span class="keyword">return</span> mLastNoteNumber; }
+    <span class="keyword">inline</span> <span class="keyword">double</span> getLastFrequency() <span class="keyword">const</span> { <span class="keyword">return</span> mLastFrequency; }
+    <span class="keyword">inline</span> <span class="keyword">int</span> getLastVelocity() <span class="keyword">const</span> { <span class="keyword">return</span> mLastVelocity; }
+    <span class="keyword">void</span> advance();
+    <span class="keyword">void</span> onMessageReceived(IMidiMsg* midiMessage);
+    <span class="keyword">inline</span> <span class="keyword">void</span> Flush(<span class="keyword">int</span> nFrames) { mMidiQueue.Flush(nFrames); mOffset = <span class="number">0</span>; }
+    <span class="keyword">inline</span> <span class="keyword">void</span> Resize(<span class="keyword">int</span> blockSize) { mMidiQueue.Resize(blockSize); }
+};
+</code></pre> <p>We have to include <em>IPlug_include_in_plug_hdr.h</em> here because otherwise <em>IMidiQueue.h</em> will generate errors.<br>As you can see, we’re keeping a private <code>IMidiQueue</code> member to store <span class=caps>MIDI</span> messages. We’re also storing some information about which notes are being played and how many in total. The three <code>mLast...</code> members are needed because our plugin will be monophonic: A note played later will mute any previous one (“<a href="http://www.soundonsound.com/sos/oct00/articles/synthsec.htm">last note priority</a>“). The function <code>noteNumberToFrequency</code> converts from a <span class=caps>MIDI</span> note number to a frequency in Hz. We need it because our <code>Oscillator</code> class deals with frequencies, not note numbers.<br>The <code>public</code> section defines some <code>inline</code> getters and passes <code>Flush</code> and <code>Resize</code> through to <code>mMidiQueue</code>. In <code>Flush</code>, we’re also setting <code>mOffset</code> to zero: Calling <code>mMidiQueue.Flush(nFrames)</code> means that we discard <code>nFrames</code> from the queue’s front. We have already processed that length in the last call to the <code>advance</code> function. Resetting <code>mOffset</code> ensures that inside the next <code>advance</code>, we’re starting from the queue’s front again. (Thanks to <em>Tale</em> for help with this.)<br>The <code>const</code> behind the parentheses means that the function <a href="http://stackoverflow.com/a/5598730/966567">doesn’t modify non-mutable members of its&nbsp;class</a>.</p> <p>Let’s add the implementation for <code>onMessageReceived</code> to <em>MIDIReceiver.cpp</em>:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> MIDIReceiver::onMessageReceived(IMidiMsg* midiMessage) {
+    IMidiMsg::EStatusMsg status = midiMessage-&gt;StatusMsg();
+    <span class="comment">// We're only interested in Note On/Off messages (not <span class="caps">CC</span>, pitch, etc.)</span>
+    <span class="keyword">if</span>(status == IMidiMsg::kNoteOn || status == IMidiMsg::kNoteOff) {
+        mMidiQueue.Add(midiMessage);
+    }
+}
+</code></pre> <p>This function will be called whenever the plugin receives a <span class=caps>MIDI</span> message. We select only <em>note on/off</em> messages and <code>Add</code> them to our <code>mMidiQueue</code>.<br>The interesting function is <code>advance</code>:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> MIDIReceiver::advance() {
+    <span class="keyword">while</span> (!mMidiQueue.Empty()) {
+        IMidiMsg* midiMessage = mMidiQueue.Peek();
+        <span class="keyword">if</span> (midiMessage-&gt;mOffset &gt; mOffset) <span class="keyword">break</span>;
+
+        IMidiMsg::EStatusMsg status = midiMessage-&gt;StatusMsg();
+        <span class="keyword">int</span> noteNumber = midiMessage-&gt;NoteNumber();
+        <span class="keyword">int</span> velocity = midiMessage-&gt;Velocity();
+        <span class="comment">// There are only note on/off messages in the queue, see ::OnMessageReceived</span>
+        <span class="keyword">if</span> (status == IMidiMsg::kNoteOn &amp;&amp; velocity) {
+            <span class="keyword">if</span>(mKeyStatus[noteNumber] == <span class="keyword">false</span>) {
+                mKeyStatus[noteNumber] = <span class="keyword">true</span>;
+                mNumKeys += <span class="number">1</span>;
+            }
+            <span class="comment">// A key pressed later overrides any previously pressed key:</span>
+            <span class="keyword">if</span> (noteNumber != mLastNoteNumber) {
+                mLastNoteNumber = noteNumber;
+                mLastFrequency = noteNumberToFrequency(mLastNoteNumber);
+                mLastVelocity = velocity;
+            }
+        } <span class="keyword">else</span> {
+            <span class="keyword">if</span>(mKeyStatus[noteNumber] == <span class="keyword">true</span>) {
+                mKeyStatus[noteNumber] = <span class="keyword">false</span>;
+                mNumKeys -= <span class="number">1</span>;
+            }
+            <span class="comment">// If the last note was released, nothing should play:</span>
+            <span class="keyword">if</span> (noteNumber == mLastNoteNumber) {
+                mLastNoteNumber = -<span class="number">1</span>;
+                mLastFrequency = -<span class="number">1</span>;
+                mLastVelocity = <span class="number">0</span>;
+            }
+        }
+        mMidiQueue.Remove();
+    }
+    mOffset++;
+}
+</code></pre> <p>This is called <em>on every sample</em> while we’re generating an audio buffer. As long as there are messages in the queue, we’re processing and removing them from the front (using <code>Peek</code> and <code>Remove</code>). But we only do this for <span class=caps>MIDI</span> messages whose <code>mOffset</code> isn’t greater than the current offset into the buffer. This means that we process every message at the right sample, keeping the relative timing intact.<br>After reading <code>noteNumber</code> and <code>velocity</code>, the <code>if</code> statement distinguishes <em>note on</em> and <em>off</em> messages (<em>no velocity</em> is interpreted as <em>note off</em>). In both cases, we’re keeping track of which notes are being played, as well as how many of them. We also update the <code>mLast...</code> members so the already mentioned <em>last note priority</em> happens. This is the place where we know the frequency has to change, so we’re updating it here. Finally, the <code>mOffset</code> is incremented so that the receiver knows how far into the buffer it currently is. An alternative would be to pass the offset in as an argument. So we now have a class that can receive all incoming <span class=caps>MIDI</span> note on/off messages. It always keeps track of which notes are being played and what the last played note (and frequency) was. Let’s make use of&nbsp;it!</p> <h2 id=using-the-midi-receiver>Using the <span class=caps>MIDI</span>&nbsp;Receiver</h2> <p>First, go into <em>resource.h</em> and make the following&nbsp;changes:</p> <pre><code class="lang-cpp"><span class="comment">// #define PLUG_CHANNEL_IO "1-1 2-2"</span>
+<span class="preprocessor">#if (defined(AAX_API) || defined(RTAS_API)) </span>
+<span class="preprocessor">#define PLUG_CHANNEL_IO "1-1 2-2"</span>
+<span class="preprocessor">#else</span>
+<span class="comment">// no audio input. mono or stereo output</span>
+<span class="preprocessor">#define PLUG_CHANNEL_IO "0-1 0-2"</span>
+<span class="preprocessor">#endif</span>
+
+<span class="comment">// ...</span>
+<span class="preprocessor">#define PLUG_IS_INST 1</span>
+
+<span class="comment">// ...</span>
+<span class="preprocessor">#define EFFECT_TYPE_VST3 "Instrument|Synth"</span>
+
+<span class="comment">// ...</span>
+<span class="preprocessor">#define PLUG_DOES_MIDI 1</span>
+</code></pre> <p>This tells the host that our plugin is an instrument that does <span class=caps>MIDI</span>. The <code>0-1 0-2</code> means that there’s either <em>no input and one output (mono)</em> (<code>0-1</code>) or <em>no input and two outputs (stereo)</em> (<code>0-2</code>).<br>Next, go into <em>Synthesis.h</em> and <code>#include &quot;MIDIReceiver.h&quot;</code> below <em>Oscillator.h</em>. In the <code>public</code> section, add the following member function&nbsp;declaration:</p> <pre><code class="lang-cpp"><span class="comment">// to receive <span class="caps">MIDI</span> messages:</span>
+<span class="keyword">void</span> ProcessMidiMsg(IMidiMsg* pMsg);
+</code></pre> <p>Add a new <code>MIDIReceiver</code> instance to the <code>private</code> section:</p> <pre><code class="lang-cpp"><span class="keyword">private</span>:
+    <span class="comment">// ...</span>
+    MIDIReceiver mMIDIReceiver;
+</code></pre> <p>Go into <em>Synthesis.cpp</em> and add the (quite simple) implementation:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::ProcessMidiMsg(IMidiMsg* pMsg) {
+    mMIDIReceiver.onMessageReceived(pMsg);
+}
+</code></pre> <p>This function will be called whenever the application receives a <span class=caps>MIDI</span> message. We’re passing the messages through to our <span class=caps>MIDI</span> receiver.<br>Let’s clean up a bit. Change the two <code>enum</code>s at the&nbsp;top:</p> <pre><code class="lang-cpp"><span class="keyword">enum</span> EParams
+{
+    kNumParams
+};
+
+<span class="keyword">enum</span> ELayout
+{
+    kWidth = GUI_WIDTH,
+    kHeight = GUI_HEIGHT
+};
+</code></pre> <p>Create just one default&nbsp;preset:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::CreatePresets() {
+    MakeDefaultPreset((<span class="keyword">char</span> *) <span class="string">"-"</span>, kNumPrograms);
+}
+</code></pre> <p>Don’t do anything when a parameter is&nbsp;changed:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::OnParamChange(<span class="keyword">int</span> paramIdx)
+{
+    IMutexLock lock(<span class="keyword">this</span>);
+}
+</code></pre> <p>We don’t need a knob in our user interface. Let’s change the constructor to something really&nbsp;minimal:</p> <pre><code class="lang-cpp">Synthesis::Synthesis(IPlugInstanceInfo instanceInfo)
+    :   IPLUG_CTOR(kNumParams, kNumPrograms, instanceInfo) {
+    TRACE;
+
+    IGraphics* pGraphics = MakeGraphics(<span class="keyword">this</span>, kWidth, kHeight);
+    pGraphics-&gt;AttachPanelBackground(&amp;COLOR_RED);
+    AttachGraphics(pGraphics);
+    CreatePresets();
+}
+</code></pre> <p>When some audio preference is changed, we have to update our oscillator with the new sample&nbsp;rate:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::Reset()
+{
+    <span class="caps">TRACE</span>;
+    IMutexLock lock(<span class="keyword">this</span>);
+    mOscillator.setSampleRate(GetSampleRate());
+}
+</code></pre> <p>The only thing left is <code>ProcessDoubleReplacing</code>. Thinking about it, we have to call <code>mMIDIReceiver.advance()</code> <em>on every sample</em>. After that, we’ll <code>getLastVelocity</code> and <code>getLastFrequency</code> from the <span class=caps>MIDI</span> receiver. Then we’ll call <code>mOscillator.setFrequency()</code> and <code>mOscillator.generate()</code> to fill the audio buffer with a tone at the right frequency.<br>We have designed <code>generate</code> to operate on a complete buffer and fill it. The <span class=caps>MIDI</span> receiver works on a sample level: <span class=caps>MIDI</span> messages can have any offset into a buffer, so <code>mLastFrequency</code> <em>can change at any sample</em>. We have to change our <code>Oscillator</code> class so it can work on a sample level as&nbsp;well.</p> <p>First, move the <code>twoPI</code> out of <code>generate</code> and into the <code>private</code> section in <em>Oscillator.h</em>. Make sure you put it <em>below</em> the declaration of <code>mPI</code>, because variables are initialized in the order in which they are declared. <a name=adding_isMuted_property></a> While we’re there, let’s also add a <code>bool</code> to indicate if the oscillator is currently muted (when no note is&nbsp;playing):</p> <pre><code class="lang-cpp"><span class="keyword">const</span> <span class="keyword">double</span> twoPI;
+<span class="keyword">bool</span> isMuted;
+</code></pre> <p>Initialize them by modifying the constructor’s initializer list. It should now look like&nbsp;this:</p> <pre><code class="lang-cpp">Oscillator() :
+    mOscillatorMode(OSCILLATOR_MODE_SINE),
+    mPI(<span class="number">2</span>*<span class="built_in">acos</span>(<span class="number">0.0</span>)),
+    twoPI(<span class="number">2</span> * mPI), <span class="comment">// This line is new</span>
+    isMuted(<span class="keyword">true</span>),  <span class="comment">// And this line</span>
+    mFrequency(<span class="number">440.0</span>),
+    mPhase(<span class="number">0.0</span>),
+    mSampleRate(<span class="number">44100.0</span>) { updateIncrement(); };
+</code></pre> <p>Add an <code>inline</code> setter to the <code>public</code> section:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">void</span> setMuted(<span class="keyword">bool</span> muted) { isMuted = muted; }
+</code></pre> <p>Right below that, add the following&nbsp;declaration:</p> <pre><code class="lang-cpp"><span class="keyword">double</span> nextSample();
+</code></pre> <p>We’ll call this function on every sample to get audio data from the oscillator. Put the following implementation in <em>Oscillator.cpp</em>:</p> <pre><code class="lang-cpp"><span class="keyword">double</span> Oscillator::nextSample() {
+    <span class="keyword">double</span> value = <span class="number">0.0</span>;
+    <span class="keyword">if</span>(isMuted) <span class="keyword">return</span> value;
+
+    <span class="keyword">switch</span> (mOscillatorMode) {
+        <span class="keyword">case</span> OSCILLATOR_MODE_SINE:
+            value = <span class="built_in">sin</span>(mPhase);
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> OSCILLATOR_MODE_SAW:
+            value = <span class="number">1.0</span> - (<span class="number">2.0</span> * mPhase / twoPI);
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> OSCILLATOR_MODE_SQUARE:
+            <span class="keyword">if</span> (mPhase &lt;= mPI) {
+                value = <span class="number">1.0</span>;
+            } <span class="keyword">else</span> {
+                value = -<span class="number">1.0</span>;
+            }
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> OSCILLATOR_MODE_TRIANGLE:
+            value = -<span class="number">1.0</span> + (<span class="number">2.0</span> * mPhase / twoPI);
+            value = <span class="number">2.0</span> * (<span class="built_in">fabs</span>(value) - <span class="number">0.5</span>);
+            <span class="keyword">break</span>;
+    }
+    mPhase += mPhaseIncrement;
+    <span class="keyword">while</span> (mPhase &gt;= twoPI) {
+        mPhase -= twoPI;
+    }
+    <span class="keyword">return</span> value;
+}
+</code></pre> <p>As you can see, we’re using <code>twoPI</code> here, and it would be wasteful to keep calculating it every sample. That’s why we turned it into a constant member variable.<br>Whenever the oscillator is muted, we just return zero. The <code>switch</code> should look very familiar, although we’re not using a <code>for</code> loop anymore. We’re just generating a single value instead of filling an entire buffer. This structure also allows us to move the phase incrementing part our, avoiding&nbsp;duplication.</p> <p>This was a good example of refactoring existing code because it’s no longer flexible enough. Of course, we could have spent an hour or two thinking about what we need from our oscillator before writing the buffer-based <code>generate</code> function. But actually implementing it took less than an hour. In simple applications like this one, it’s sometimes more efficient to just implement one approach and see how it works in practice. Most of the time (like in this case), you’ll find that the overall idea was right (e.g. how to calculate different waveforms), but maybe you forgot one facet of the problem. If, on the other hand, you’re designing a public <span class=caps>API</span>, changing something later may be very inconvenient, so you better think thoroughly in advance. It&nbsp;depends.</p> <p>We will call <code>setFrequency</code> on every sample. This means that <code>updateIncrement</code> will also be called very often, and it’s not very&nbsp;optimized:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Oscillator::updateIncrement() {
+    mPhaseIncrement = mFrequency * <span class="number">2</span> * mPI / mSampleRate;
+}
+</code></pre> <p><code>2 * mPI * mSampleRate</code> only changes when the sample rate changes. So you could cache this calculation and only recalculate it inside <code>Oscillator::setSampleRate</code>. But overzealous optimization like this can make code ugly. In practice, I didn’t notice a performance issue here. After all, we’re only playing one voice at the time, so when we get polyphonic, things will be different and we will definitely improve this. Now we’re ready to implement <code>ProcessDoubleReplacing</code> in <em>Synthesis.cpp</em>:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Synthesis::ProcessDoubleReplacing(
+    <span class="keyword">double</span>** inputs,
+    <span class="keyword">double</span>** outputs,
+    <span class="keyword">int</span> nFrames)
+{
+    <span class="comment">// Mutex is already locked for us.</span>
+
+    <span class="keyword">double</span> *leftOutput = outputs[<span class="number">0</span>];
+    <span class="keyword">double</span> *rightOutput = outputs[<span class="number">1</span>];
+
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; nFrames; ++i) {
+        mMIDIReceiver.advance();
+        <span class="keyword">int</span> velocity = mMIDIReceiver.getLastVelocity();
+        <span class="keyword">if</span> (velocity &gt; <span class="number">0</span>) {
+            mOscillator.setFrequency(mMIDIReceiver.getLastFrequency());
+            mOscillator.setMuted(<span class="keyword">false</span>);
+        } <span class="keyword">else</span> {
+            mOscillator.setMuted(<span class="keyword">true</span>);
+        }
+        leftOutput[i] = rightOutput[i] = mOscillator.nextSample() * velocity / <span class="number">127.0</span>;
+    }
+
+    mMIDIReceiver.Flush(nFrames);
+}
+</code></pre> <p>In the <code>for</code> loop, we’re first letting the <span class=caps>MIDI</span> receiver update its values (by calling <code>advance</code>). If there’s a note playing (i.e. <code>velocity &gt; 0</code>), we update the oscillator’s frequency and unmute it. Otherwise, we mute the oscillator (meaning that <code>nextSample</code> will return zeros).<br>After that, it’s simply about calling <code>nextSample</code> to get a value, changing its volume (<code>velocity</code> is an integer between <code>0</code> and <code>127</code>), and assigning the result to both output buffers. Finally we call <code>Flush</code> to move the <span class=caps>MIDI</span> queue’s&nbsp;front.</p> <h2 id=try-it->Try&nbsp;it!</h2> <p>Run as <em><span class=caps>VST2</span></em> or <em><span class=caps>AU</span></em>. If the AudioUnit doesn’t appear in your host, you may have to change the <code>PLUG_UNIQUE_ID</code> in <em>resource.h</em>. If two plugins have the same <span class=caps>ID</span>, your host may ignore all but one of them.<br>You will have to input some <span class=caps>MIDI</span> data into your plugin. The easiest way to do that is to use <span class=caps>REAPER</span>’s virtual keyboard. Click <em>View</em> → <em>Virtual <span class=caps>MIDI</span> Keyboard</em> to show it. On the track with your plugin, there’s a round red record button. <em>Right</em>-click it and configure the track to receive <span class=caps>MIDI</span> from the virtual&nbsp;keyboard:</p> <p><a href="/blog/articles/audio-plugins-009-receiving-midi/midi-input.png"><img src="/blog/articles/audio-plugins-009-receiving-midi/midi-input.png" alt=""></a></p> <p>In the same menu, make sure <em>Monitor Input</em> is enabled. Now, <em>with the virtual keyboard’s window focussed</em>, you can play your plugin using your computer keyboard. Press the <span class=caps>QWERTY</span> keys and your should hear sound from your plugin.<br>If you have a <span class=caps>MIDI</span> keyboard connected, you can also try the standalone version. Make you you select the right <span class=caps>MIDI</span> input in the preferences. If you don’t hear any audio, you may have to delete <em>~/Library/Application&nbsp;Support/Synthesis/settings.ini</em>.</p> <p>You can download the current project <a href="/blog/articles/audio-plugins-009-receiving-midi/source.zip">here</a>. <a href="/blog/articles/audio-plugins-010-virtual-keyboard/">Next time</a>, we’ll add a nice virtual keyboard to our plugin’s&nbsp;<span class=caps>GUI</span>!</p> </section> </article> <div id=donation_prompt>If you found this useful, please feel free to <form action="https://www.paypal.com/cgi-bin/webscr" method=post target=_top class=donation-form> <input type=hidden name=cmd value=_s-xclick> <input type=hidden name=hosted_button_id value=JQDU8W5PJBWL6> <input type=hidden name=ref value="/blog/articles/audio-plugins-009-receiving-midi/"> <input type=image src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif" border=0 name=submit alt="PayPal - The safer, easier way to pay online!"><img alt="" border=0 src="https://www.paypalobjects.com/de_DE/i/scr/pixel.gif" width=1 height=1> </form>! </div> <iframe src="//www.facebook.com/plugins/like.php?href=http%3A%2F%2Fwww.martin-finke.de%2Fblog%2F&amp;width=450&amp;height=21&amp;colorscheme=light&amp;layout=button_count&amp;action=like&amp;show_faces=false&amp;send=false" scrolling=no frameborder=0 style="border: none; overflow: hidden; width: 200px; height: 21px;" allowtransparency=true></iframe> <div class=comments> <div id=disqus_thread></div> <script type="text/javascript">var disqus_shortname="martinfinke";(function(){var a=document.createElement("script");a.type="text/javascript";a.async=true;a.src="//"+disqus_shortname+".disqus.com/embed.js";(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(a)})();</script> <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript> <a href="http://disqus.com" class=dsq-brlink>comments powered by <span class=logo-disqus>| Disqus</span></a> </div> </div> </div> <footer> <div class=content-wrap> <div class=nav><a href="/blog/">« Index</a></div> <section class=copy> <p>&copy; 2015 Martin Finke – <a href="/blog/impressum.html" class=impressum-link>Impressum</a></p> </section> </div> </footer> <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script> <script>window.jQuery||document.write('<script src="/blog/js/vendor/jquery-1.10.2.min.js"><\/script>');</script> <script type="text/javascript">$(document).ready(function(){$('a:link[href^=http]:not([href*="martin-finke.de"])').attr("target","_blank")});</script> <script type="text/javascript">var _gaq=_gaq||[];_gaq.push(["_setAccount","UA-43375106-1"]);_gaq.push(["_trackPageview"]);(function(){var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src=("https:"==document.location.protocol?"https://":"http://")+"stats.g.doubleclick.net/dc.js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(b,a)})();</script> </body> </html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html> <html lang=en> <head> <meta charset=utf-8> <meta http-equiv=X-UA-Compatible content="IE=edge,chrome=1"> <meta name=HandheldFriendly content=True> <meta name=MobileOptimized content=320> <meta name=viewport content="width=device-width"> <meta http-equiv=cleartype content=on> <meta property="fb:admins" content=100001493355877> <meta property="og:image" content="http://www.martin-finke.de/blog/img/making_audio_plugins_thumbnail.png"> <meta property="og:image:type" content="image/png"> <meta property="og:image:width" content=100> <meta property="og:image:height" content=100> <title>Making Audio Plugins Part 13: Filter - Martin Finke's Blog </title> <link rel=alternate href="/blog/feed.xml" type="application/rss+xml" title="Music &amp; Programming"> <link href="http://fonts.googleapis.com/css?family=Domine:700|Inconsolata:400,700" rel=stylesheet type="text/css"> <link rel=stylesheet href='/blog/css/4407aa6.css'> </head> <body class=article-detail> <header class=header> <div class=content-wrap> <h1>Making Audio Plugins Part 13: Filter</h1> <div class=taglinks><a href="/blog/tags/programming.html" class=taglink>Programming</a>, <a href="/blog/tags/dsp.html" class=taglink>DSP</a>, <a href="/blog/tags/making_audio_plugins.html" class=taglink>Making Audio Plugins</a> </div> </div> </header> <div id=content> <div class=content-wrap> <article class=article> <section class=content><p>Today we’ll create a resonant filter. <span class=more></span> Filter design is a complex topic that keeps <span class=caps>DSP</span> engineers’ brains busy worldwide, and for now we won’t get too far into that. For not let’s just add a simple resonant <em>Low-Pass</em>, <em>Band-Pass</em> and <em>High-Pass</em> filter to our plugin. We will use an <a href="http://www.musicdsp.org/showone.php?id=29">algorithm</a> by Paul&nbsp;Kellett.</p> <h2 id=creating-the-filter>Creating the&nbsp;Filter</h2> <p>Let’s start by creating a new C++ class named <code>Filter</code>. Make sure you add it to all targets. In <em>Filter.h</em>, remove the <code>#include &lt;iostream&gt;</code> and add the following class: <a name=calculateFeedbackAmount_implementation></a></p> <pre><code class="lang-cpp"><span class="keyword">class</span> Filter {
+<span class="keyword">public</span>:
+    <span class="keyword">enum</span> FilterMode {
+        FILTER_MODE_LOWPASS = <span class="number">0</span>,
+        FILTER_MODE_HIGHPASS,
+        FILTER_MODE_BANDPASS,
+        kNumFilterModes
+    };
+    Filter() :
+    cutoff(<span class="number">0.99</span>),
+    resonance(<span class="number">0.0</span>),
+    mode(FILTER_MODE_LOWPASS),
+    buf0(<span class="number">0.0</span>),
+    buf1(<span class="number">0.0</span>)
+    {
+        calculateFeedbackAmount();
+    };
+    <span class="keyword">double</span> process(<span class="keyword">double</span> inputValue);
+    <span class="keyword">inline</span> <span class="keyword">void</span> setCutoff(<span class="keyword">double</span> newCutoff) { cutoff = newCutoff; calculateFeedbackAmount(); };
+    <span class="keyword">inline</span> <span class="keyword">void</span> setResonance(<span class="keyword">double</span> newResonance) { resonance = newResonance; calculateFeedbackAmount(); };
+    <span class="keyword">inline</span> <span class="keyword">void</span> setFilterMode(FilterMode newMode) { mode = newMode; }
+<span class="keyword">private</span>:
+    <span class="keyword">double</span> cutoff;
+    <span class="keyword">double</span> resonance;
+    FilterMode mode;
+    <span class="keyword">double</span> feedbackAmount;
+    <span class="keyword">inline</span> <span class="keyword">void</span> calculateFeedbackAmount() { feedbackAmount = resonance + resonance/(<span class="number">1.0</span> - cutoff); }
+    <span class="keyword">double</span> buf0;
+    <span class="keyword">double</span> buf1;
+};
+</code></pre> <p>In the <code>private</code> section we of course have the values for filter cutoff and resonance. <code>mode</code> indicates what mode (Lowpass, Highpass, Bandpass) the filter is currently in. <code>feedbackAmount</code>, <code>buf0</code> and <code>buf1</code> are values used by the filter algorithm (more on this later). The constructor just initializes the members to sensible values and calculates the feedback amount. The <code>process</code> function will be called every sample to filter the incoming signal. Because <code>feedbackAmount</code> depends on both <code>cutoff</code> and <code>resonance</code>, the setters for <code>cutoff</code> and <code>resonance</code> have to call <code>calculateFeedbackAmount</code> after updating the&nbsp;member.</p> <p><a name=filter_algorithm></a> Add the filter algorithm to <em>Filter.cpp</em>:</p> <pre><code class="lang-cpp"><span class="comment">// By Paul Kellett</span>
+<span class="comment">// http://www.musicdsp.org/showone.php?id=29</span>
+
+<span class="keyword">double</span> Filter::process(<span class="keyword">double</span> inputValue) {
+    buf0 += cutoff * (inputValue - buf0);
+    buf1 += cutoff * (buf0 - buf1);
+    <span class="keyword">switch</span> (mode) {
+        <span class="keyword">case</span> FILTER_MODE_LOWPASS:
+            <span class="keyword">return</span> buf1;
+        <span class="keyword">case</span> FILTER_MODE_HIGHPASS:
+            <span class="keyword">return</span> inputValue - buf0;
+        <span class="keyword">case</span> FILTER_MODE_BANDPASS:
+            <span class="keyword">return</span> buf0 - buf1;
+        <span class="keyword">default</span>:
+            <span class="keyword">return</span> <span class="number">0.0</span>;
+    }
+}
+</code></pre> <p>Pretty short, isn’t it? The algorithm is basically two <em>first-order</em> lowpass filters in series. <em>First-order</em> means that for every octave above the cutoff frequency, the amplitude is halved (i.e. the volume is reduced by 6dB). The two lines that calculate <code>buf0</code> and <code>buf1</code> are quite similar: Each of them is a first-order lowpass filter. The first line takes in <code>inputValue</code>, whereas the second line takes <code>buf0</code> (the output of the first filter) instead. So the two filters are in series. Two -6dB/octave filters them in series means a reduction of -12dB per octave. This will become clearer in a moment. You can see in the <code>switch</code> statement that <code>buf1</code> is the lowpass output. Try <code>return</code>ing <code>buf0</code> instead: You’ll get an attenuation of -6dB per octave (instead of -12dB), so the sound has more&nbsp;highs.</p> <p>The <code>case FILTER_MODE_HIGHPASS</code> is actually quite intuitive. <code>buf0</code> is <em>just the low frequencies</em> (of a first-order filter). So if we take the <code>inputValue</code> and subtract the low frequencies, we just keep the high ones. You could also use <code>buf1</code> here for a steeper&nbsp;cut.</p> <p><code>case FILTER_MODE_BANDPASS</code> shows that the bandpass output is <code>buf0 - buf1</code>. As already stated, <code>buf0</code> has slightly more content right above the cutoff frequency than <code>buf1</code>. If we subtract <code>buf1</code> from <code>buf0</code>, <em>we keep just that content</em>. So: <em>Subtracting a lowpass output from a lower-order lowpass gives a bandpass&nbsp;output</em>.</p> <p>Calculating <code>buf1</code> depends on <em>the previous value of <code>buf1</code></em>. This kind of feedback means that it’s an <em>Infinite Impulse Response (<span class=caps>IIR</span>)</em> Filter. Read <a href="http://www.dspguide.com/ch14/1.htm">this</a> for more information on filter types. We’re not going deeper into filter design here, because I think at this point the math would be a little too&nbsp;much.</p> <h2 id=using-the-filter>Using the&nbsp;Filter</h2> <p>Let’s use our new filter class! We’ll begin with the <span class=caps>GUI</span>. Remove <em>bg.png</em> from your project (answer “Move to trash”). Then download the following graphics and add them to the&nbsp;project:</p> <ul> <li><a href="/blog/articles/audio-plugins-013-filter/filtermode.png">filtermode.png</a> (<a href="/blog/articles/audio-plugins-013-filter/filtermode.tif">Here</a>‘s the&nbsp;<span class=caps>TIF</span>)</li> <li><a href="/blog/articles/audio-plugins-013-filter/knob_small.png">knob_small.png</a> (Basically the same knob resized to 50x50&nbsp;pixels)</li> <li><a href="/blog/articles/audio-plugins-013-filter/bg.png">bg.png</a> (A new <span class=caps>GUI</span> background with space for the filter&nbsp;controls)</li> </ul> <p>Add the references and IDs to <em>resource.h</em>:</p> <pre><code class="lang-cpp"><span class="comment">// Unique IDs for each image resource.</span>
+<span class="preprocessor">#define BG_ID         101</span>
+<span class="preprocessor">#define WHITE_KEY_ID  102</span>
+<span class="preprocessor">#define BLACK_KEY_ID  103</span>
+<span class="preprocessor">#define WAVEFORM_ID   104</span>
+<span class="preprocessor">#define KNOB_ID       105</span>
+<span class="preprocessor">#define KNOB_SMALL_ID 106</span>
+<span class="preprocessor">#define FILTERMODE_ID 107</span>
+
+<span class="comment">// Image resource locations for this plug.</span>
+<span class="preprocessor">#define BG_FN         "resources/img/bg.png"</span>
+<span class="preprocessor">#define WHITE_KEY_FN  "resources/img/whitekey.png"</span>
+<span class="preprocessor">#define BLACK_KEY_FN  "resources/img/blackkey.png"</span>
+<span class="preprocessor">#define WAVEFORM_FN   "resources/img/waveform.png"</span>
+<span class="preprocessor">#define KNOB_FN       "resources/img/knob.png"</span>
+<span class="preprocessor">#define KNOB_SMALL_FN "resources/img/knob_small.png"</span>
+<span class="preprocessor">#define FILTERMODE_FN "resources/img/filtermode.png"</span>
+</code></pre> <p>Edit the top of <em>Synthesis.rc</em> to&nbsp;this:</p> <pre><code class="lang-cpp"><span class="preprocessor">#include "resource.h"</span>
+
+BG_ID       <span class="caps">PNG</span> BG_FN
+WHITE_KEY_ID       <span class="caps">PNG</span> WHITE_KEY_FN
+BLACK_KEY_ID       <span class="caps">PNG</span> BLACK_KEY_FN
+WAVEFORM_ID       <span class="caps">PNG</span> WAVEFORM_FN
+KNOB_ID       <span class="caps">PNG</span> KNOB_FN
+KNOB_SMALL_ID       <span class="caps">PNG</span> KNOB_SMALL_FN
+FILTERMODE_ID       <span class="caps">PNG</span> FILTERMODE_FN
+</code></pre> <p>In <em>Synthesis.h</em>, <code>#include &quot;Filter.h&quot;</code> and add a <code>private</code> member:</p> <pre><code class="lang-cpp">Filter mFilter;
+</code></pre> <p>In <em>Synthesis.cpp</em>, update <code>EParams</code>:</p> <pre><code class="lang-cpp"><span class="keyword">enum</span> EParams
+{
+    mWaveform = <span class="number">0</span>,
+    mAttack,
+    mDecay,
+    mSustain,
+    mRelease,
+    mFilterMode,
+    mFilterCutoff,
+    mFilterResonance,
+    mFilterAttack,
+    mFilterDecay,
+    mFilterSustain,
+    mFilterRelease,
+    mFilterEnvelopeAmount,
+    kNumParams
+};
+</code></pre> <p>Change the y coordinate for the waveform switch (it’s in the&nbsp;constructor):</p> <pre><code class="lang-cpp">pGraphics-&gt;AttachControl(<span class="keyword">new</span> ISwitchControl(<span class="keyword">this</span>, <span class="number">24</span>, <span class="number">38</span>, mWaveform, &amp;waveformBitmap));
+</code></pre> <p>The volume envelope knobs can stay where they are. Let’s add the switch to change filter mode (Lowpass, Highpass, Bandpass). Right above <code>AttachGraphics(pGraphics)</code>, add&nbsp;this:</p> <pre><code class="lang-cpp">GetParam(mFilterMode)-&gt;InitEnum(<span class="string">"Filter Mode"</span>, Filter::FILTER_MODE_LOWPASS, Filter::kNumFilterModes);
+IBitmap filtermodeBitmap = pGraphics-&gt;LoadIBitmap(FILTERMODE_ID, FILTERMODE_FN, <span class="number">3</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> ISwitchControl(<span class="keyword">this</span>, <span class="number">24</span>, <span class="number">123</span>, mFilterMode, &amp;filtermodeBitmap));
+</code></pre> <p>We also need a knob to change the cutoff frequency and one for the resonance. We’ll use our new <em>knob_small.png</em>. Add the following code right before the <code>AttachGraphics</code> call:</p> <pre><code class="lang-cpp"><span class="comment">// Knobs for filter cutoff and resonance</span>
+IBitmap smallKnobBitmap = pGraphics-&gt;LoadIBitmap(KNOB_SMALL_ID, KNOB_SMALL_FN, <span class="number">64</span>);
+<span class="comment">// Cutoff knob:</span>
+GetParam(mFilterCutoff)-&gt;InitDouble(<span class="string">"Cutoff"</span>, <span class="number">0.99</span>, <span class="number">0.01</span>, <span class="number">0.99</span>, <span class="number">0.001</span>);
+GetParam(mFilterCutoff)-&gt;SetShape(<span class="number">2</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">5</span>, <span class="number">177</span>, mFilterCutoff, &amp;smallKnobBitmap));
+<span class="comment">// Resonance knob:</span>
+GetParam(mFilterResonance)-&gt;InitDouble(<span class="string">"Resonance"</span>, <span class="number">0.01</span>, <span class="number">0.01</span>, <span class="number">1.0</span>, <span class="number">0.001</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">61</span>, <span class="number">177</span>, mFilterResonance, &amp;smallKnobBitmap));
+</code></pre> <p>Be aware that the value for cutoff should never be <code>1.0</code>! It will lead to a division by zero inside <code>calculateFeedbackAmount</code>. In <code>ProcessDoubleReplacing</code>, surround the sample generation code with a call to <code>mFilter.process</code>:</p> <pre><code class="lang-cpp">leftOutput[i] = rightOutput[i] = mFilter.process(mOscillator.nextSample() * mEnvelopeGenerator.nextSample() * velocity / <span class="number">127.0</span>);
+</code></pre> <p>Finally, we have to react to parameter changes. Add the following <code>case</code>s to the <code>switch</code> statement in <code>Synthesis::OnParamChange</code>:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> mFilterCutoff:
+    mFilter.setCutoff(GetParam(paramIdx)-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterResonance:
+    mFilter.setResonance(GetParam(paramIdx)-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterMode:
+    mFilter.setFilterMode(<span class="keyword">static_cast</span>&lt;Filter::FilterMode&gt;(GetParam(paramIdx)-&gt;Int()));
+    <span class="keyword">break</span>;
+</code></pre> <p>We’re ready to try the filter! Run the plugin, play a few notes and tweak the&nbsp;cutoff.</p> <h2 id=resonance>Resonance</h2> <p>Resonance is basically just a peak at the cutoff frequency. We can realize this by taking a bandpass output, multiplying it by a certain amount and adding it to the signal. Modify the filter’s first line so it looks like&nbsp;this:</p> <pre><code class="lang-cpp">buf0 += cutoff * (inputValue - buf0 + feedbackAmount * (buf0 - buf1));
+</code></pre> <p>The left part is the same. To the right, we’re just adding <code>(buf0 - buf1)</code> (which is a bandpass output) multiplied by <code>feedbackAmount</code>. You can see from <a href="/blog/articles/audio-plugins-013-filter/#calculateFeedbackAmount_implementation">the implementation of <code>calculateFeedbackAmount</code></a> that <code>feedbackAmount</code> is proportional to <code>resonance</code>. So the peak will be louder if <code>resonance</code> is&nbsp;high.</p> <p>Run the plugin again. Try tweaking the cutoff knob while holding a note, especially with high resonance. When you turn the resonance all the way up, you’ll get self-oscillation, which can be used to create <a href="http://www.youtube.com/watch?v=JWyMj6KxGHM">some interesting sounds</a>. We can get a great variety of sounds with the few parameters we have, especially when we change the filter mode to bandpass or&nbsp;highpass.</p> <h2 id=from-12db-to-24db>From -12dB to&nbsp;-24dB</h2> <p>Instead of just two filters, let’s try putting <em>four</em> of them in series! This will give us an attenuation of -24dB per octave. Add the following two lines right above the <code>switch</code> statement in <code>Filter::process</code>:</p> <pre><code class="lang-cpp">buf2 += cutoff * (buf1 - buf2);
+buf3 += cutoff * (buf2 - buf3);
+</code></pre> <p>This is the same pattern as the <code>buf1</code> line: Take the output from the previous filter, subtract <em>the last output</em> of this filter, multiply by <code>cutoff</code> and add it to the last output value. You could keep adding lines like this, but it makes the filter more expensive to calculate, and possibly <a href="https://ccrma.stanford.edu/~Jos/filters/Filter_Stability.html">unstable</a> (more on this in a later post). Make sure you modify the <code>switch</code> statement,&nbsp;too:</p> <pre><code class="lang-cpp"><span class="keyword">switch</span> (mode) {
+    <span class="keyword">case</span> FILTER_MODE_LOWPASS:
+        <span class="keyword">return</span> buf3;
+    <span class="keyword">case</span> FILTER_MODE_HIGHPASS:
+        <span class="keyword">return</span> inputValue - buf3;
+    <span class="keyword">case</span> FILTER_MODE_BANDPASS:
+        <span class="keyword">return</span> buf0 - buf3;
+    <span class="keyword">default</span>:
+        <span class="keyword">return</span> <span class="number">0.0</span>;
+}
+</code></pre> <p>We’re using <code>buf3</code> instead of <code>buf1</code>. <code>buf3</code> is the the output of <em>four</em> first-oder filters in series, i.e. it has an attenuation of -24dB per octave. We haven’t declared (or initialized) <code>buf2</code> and <code>buf3</code> yet, so let’s go into <em>Filter.h</em>. Add the <code>private</code> members:</p> <pre><code class="lang-cpp"><span class="keyword">double</span> buf2;
+<span class="keyword">double</span> buf3;
+</code></pre> <p>And initialize them to zero (just like <code>buf0</code> and <code>buf1</code>):</p> <pre><code class="lang-cpp">Filter() :
+    <span class="comment">// ...</span>
+    buf0(<span class="number">0.0</span>),
+    buf1(<span class="number">0.0</span>),
+    buf2(<span class="number">0.0</span>),
+    buf3(<span class="number">0.0</span>)
+    <span class="comment">// ...</span>
+</code></pre> <p>If you run the plugin again, you’ll hear that the filter has become <em>steeper</em>: Frequencies above the cutoff get attenuated more strongly. This is what you often find in classic analogue&nbsp;synths.</p> <p>Now what if we could change the filter cutoff over&nbsp;time?</p> <h2 id=filter-envelope>Filter&nbsp;Envelope</h2> <p>The fun has just begun! Thanks to how we built the <code>EnvelopeGenerator</code> class, it’s very easy to add a second envelope which will modulate the filter cutoff. Actually, we shouldn’t let the envelope change our filter’s <code>cutoff</code> variable directly. That variable is linked to the knob in our <span class=caps>GUI</span>. Instead, we’ll add another variable <code>cutoffMod</code>, that will be modified by the envelope. It will be added to the <code>cutoff</code> variable to yield the <em>calculated cutoff</em>. In <em>Filter.h</em>, <code>#include &lt;cmath&gt;</code> and add a <code>private</code> member&nbsp;variable:</p> <pre><code class="lang-cpp"><span class="keyword">double</span> cutoffMod;
+</code></pre> <p>Initialize&nbsp;it:</p> <pre><code class="lang-cpp">Filter() :
+    cutoff(<span class="number">0.99</span>),
+    resonance(<span class="number">0.01</span>),
+    cutoffMod(<span class="number">0.0</span>),
+    <span class="comment">// ...</span>
+</code></pre> <p>The <em>calculated cutoff</em> is the sum of <code>cutoff</code> and <code>cutoffMod</code>. But we have to make sure it doesn’t go out of the allowed range. Add the following to the <code>private</code> section:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">double</span> getCalculatedCutoff() <span class="keyword">const</span> {
+    <span class="keyword">return</span> fmax(fmin(cutoff + cutoffMod, <span class="number">0.99</span>), <span class="number">0.01</span>);
+};
+</code></pre> <p>Let’s make <code>calculateFeedbackAmount</code> use the calculated&nbsp;cutoff:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">void</span> calculateFeedbackAmount() {
+    feedbackAmount = resonance + resonance/(<span class="number">1.0</span> - getCalculatedCutoff());
+}
+</code></pre> <p>Finally, let’s add the <code>public</code> setter function for <code>cutoffMod</code>. Since <code>feedbackAmount</code> now depends on the calculated cutoff, the setter has to update it as&nbsp;well:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">void</span> setCutoffMod(<span class="keyword">double</span> newCutoffMod) {
+    cutoffMod = newCutoffMod;
+    calculateFeedbackAmount();
+}
+</code></pre> <p>Of course we have to change the algorithm as well. Open <em>Filter.cpp</em> and change replace the first four lines of <code>Filter::process</code> (where the <code>buf</code> variables are calculated) with the&nbsp;following:</p> <pre><code class="lang-cpp"><span class="keyword">if</span> (inputValue == <span class="number">0.0</span>) <span class="keyword">return</span> inputValue;
+<span class="keyword">double</span> calculatedCutoff = getCalculatedCutoff();
+buf0 += calculatedCutoff * (inputValue - buf0 + feedbackAmount * (buf0 - buf1));
+buf1 += calculatedCutoff * (buf0 - buf1);
+buf2 += calculatedCutoff * (buf1 - buf2);
+buf3 += calculatedCutoff * (buf2 - buf3);
+</code></pre> <p>The first line ensures the filter won’t be busy when the input is silent. Of course, such a check only makes sense when the code that follows it is notably more expensive than the comparison itself. That seems to be the case here. Apart from that, we have just changed the algorithm so it uses the calculated cutoff instead of just <code>cutoff</code>.</p> <p>Now that our filter is ready to be modulated from outside (by calling <code>setCutoffMod</code>), we’ll make some changes to the <code>Synthesis</code> class: We’ll add a second envelope that will be triggered just like our existing volume envelope. The user will be able to decide <em>how much</em> the filter’s <code>cutoffMod</code> is affected by the envelope: We’ll add a new parameter called <code>filterEnvelopeAmount</code> with values between <code>-1</code> and <code>+1</code>. Finally, we’ll add <span class=caps>GUI</span> controls for&nbsp;everything.</p> <p>In <em>Synthesis.h</em>, add the following <code>private</code> members:</p> <pre><code class="lang-cpp">EnvelopeGenerator mFilterEnvelopeGenerator;
+<span class="keyword">double</span> filterEnvelopeAmount;
+</code></pre> <p>We want <em>both</em> envelopes to be triggered according to <span class=caps>MIDI</span> note on/off messages. Replace the implementations for <code>onNoteOn</code> and <code>onNoteOff</code>:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">void</span> onNoteOn(<span class="keyword">const</span> <span class="keyword">int</span> noteNumber, <span class="keyword">const</span> <span class="keyword">int</span> velocity) {
+    mEnvelopeGenerator.enterStage(EnvelopeGenerator::ENVELOPE_STAGE_ATTACK);
+    mFilterEnvelopeGenerator.enterStage(EnvelopeGenerator::ENVELOPE_STAGE_ATTACK);
+};
+<span class="keyword">inline</span> <span class="keyword">void</span> onNoteOff(<span class="keyword">const</span> <span class="keyword">int</span> noteNumber, <span class="keyword">const</span> <span class="keyword">int</span> velocity) {
+    mEnvelopeGenerator.enterStage(EnvelopeGenerator::ENVELOPE_STAGE_RELEASE);
+    mFilterEnvelopeGenerator.enterStage(EnvelopeGenerator::ENVELOPE_STAGE_RELEASE);
+};
+</code></pre> <p>This is just like before, except that <code>enterStage</code> is called on both envelopes. In <em>Synthesis.cpp</em>, insert the following line inside <code>ProcessDoubleReplacing</code>, right before the <code>leftOutput[i]</code> line:</p> <pre><code class="lang-cpp">mFilter.setCutoffMod(mFilterEnvelopeGenerator.nextSample() * filterEnvelopeAmount);
+</code></pre> <p>As you can see, we’re getting the <code>nextSample</code> from the filter envelope, multiply it by the filterEnvelopeAmount and set the filter’s <code>cutoffMod</code> with the result. We shouldn’t forget to initialize <code>filterEnvelopeAmount</code>. Add the initializer to the&nbsp;constructor:</p> <pre><code class="lang-cpp">Synthesis::Synthesis(IPlugInstanceInfo instanceInfo) : IPLUG_CTOR(kNumParams, kNumPrograms, instanceInfo),
+    lastVirtualKeyboardNoteNumber(virtualKeyboardMinimumNoteNumber - <span class="number">1</span>),
+    filterEnvelopeAmount(<span class="number">0.0</span>) {
+    <span class="comment">// ...</span>
+}
+</code></pre> <p>And let’s not forget to set the filter envelope’s sample rate when it’s changed in our plugin. Add this to <code>Synthesis::Reset</code>:</p> <pre><code class="lang-cpp">mFilterEnvelopeGenerator.setSampleRate(GetSampleRate());
+</code></pre> <p>We have already added the parameters to <code>EParams</code>, so we just have to initialize them and add knobs. Inside the constructor, just above the <code>AttachGraphics</code> call, add the&nbsp;following:</p> <pre><code class="lang-cpp"><span class="comment">// Knobs for filter envelope</span>
+<span class="comment">// Attack knob</span>
+GetParam(mFilterAttack)-&gt;InitDouble(<span class="string">"Filter Env Attack"</span>, <span class="number">0.01</span>, <span class="number">0.01</span>, <span class="number">10.0</span>, <span class="number">0.001</span>);
+GetParam(mFilterAttack)-&gt;SetShape(<span class="number">3</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">139</span>, <span class="number">178</span>, mFilterAttack, &amp;smallKnobBitmap));
+<span class="comment">// Decay knob:</span>
+GetParam(mFilterDecay)-&gt;InitDouble(<span class="string">"Filter Env Decay"</span>, <span class="number">0.5</span>, <span class="number">0.01</span>, <span class="number">15.0</span>, <span class="number">0.001</span>);
+GetParam(mFilterDecay)-&gt;SetShape(<span class="number">3</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">195</span>, <span class="number">178</span>, mFilterDecay, &amp;smallKnobBitmap));
+<span class="comment">// Sustain knob:</span>
+GetParam(mFilterSustain)-&gt;InitDouble(<span class="string">"Filter Env Sustain"</span>, <span class="number">0.1</span>, <span class="number">0.001</span>, <span class="number">1.0</span>, <span class="number">0.001</span>);
+GetParam(mFilterSustain)-&gt;SetShape(<span class="number">2</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">251</span>, <span class="number">178</span>, mFilterSustain, &amp;smallKnobBitmap));
+<span class="comment">// Release knob:</span>
+GetParam(mFilterRelease)-&gt;InitDouble(<span class="string">"Filter Env Release"</span>, <span class="number">1.0</span>, <span class="number">0.001</span>, <span class="number">15.0</span>, <span class="number">0.001</span>);
+GetParam(mFilterRelease)-&gt;SetShape(<span class="number">3</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">307</span>, <span class="number">178</span>, mFilterRelease, &amp;smallKnobBitmap));
+
+<span class="comment">// Filter envelope amount knob:</span>
+GetParam(mFilterEnvelopeAmount)-&gt;InitDouble(<span class="string">"Filter Env Amount"</span>, <span class="number">0.0</span>, -<span class="number">1.0</span>, <span class="number">1.0</span>, <span class="number">0.001</span>);
+pGraphics-&gt;AttachControl(<span class="keyword">new</span> IKnobMultiControl(<span class="keyword">this</span>, <span class="number">363</span>, <span class="number">178</span>, mFilterEnvelopeAmount, &amp;smallKnobBitmap));
+</code></pre> <p>This is very similar to the volume envelope knobs, except that we use the <code>smallKnobBitmap</code> here. In addition to the four envelope controls, we also add a knob for the filter envelope amount. The only thing left is to react to user input on these knobs. Add these <code>case</code>s to the <code>switch</code> in <code>Synthesis::OnParamChange</code>:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> mFilterAttack:
+    mFilterEnvelopeGenerator.setStageValue(EnvelopeGenerator::ENVELOPE_STAGE_ATTACK, GetParam(paramIdx)-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterDecay:
+    mFilterEnvelopeGenerator.setStageValue(EnvelopeGenerator::ENVELOPE_STAGE_DECAY, GetParam(paramIdx)-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterSustain:
+    mFilterEnvelopeGenerator.setStageValue(EnvelopeGenerator::ENVELOPE_STAGE_SUSTAIN, GetParam(paramIdx)-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterRelease:
+    mFilterEnvelopeGenerator.setStageValue(EnvelopeGenerator::ENVELOPE_STAGE_RELEASE, GetParam(paramIdx)-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterEnvelopeAmount:
+    filterEnvelopeAmount = GetParam(paramIdx)-&gt;Value();
+    <span class="keyword">break</span>;
+</code></pre> <h2 id=i-love-acid->I Love&nbsp;Acid!</h2> <p>And it’s done! Run the plugin again and modulate the filter using the new envelope! Try the following knob positions and play low notes (around C1) for a particularly squelchy bass&nbsp;sound:</p> <p><a href="/blog/articles/audio-plugins-013-filter/screenshot.png"><img src="/blog/articles/audio-plugins-013-filter/screenshot.png" alt=""></a></p> <p>With little work, we have re-used our <code>EnvelopeGenerator</code> class as a filter envelope. This makes our plugin even more flexible, and it’s already capable of a wide range of sounds. We have almost finished a classic monophonic synthesizer! You can download the source files for this post <a href="/blog/articles/audio-plugins-013-filter/source.zip">here</a>. In the next post we’ll learn <a href="/blog/articles/audio-plugins-014-lfo/">how to create an <span class=caps>LFO</span></a>!</p> </section> </article> <div id=donation_prompt>If you found this useful, please feel free to <form action="https://www.paypal.com/cgi-bin/webscr" method=post target=_top class=donation-form> <input type=hidden name=cmd value=_s-xclick> <input type=hidden name=hosted_button_id value=JQDU8W5PJBWL6> <input type=hidden name=ref value="/blog/articles/audio-plugins-013-filter/"> <input type=image src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif" border=0 name=submit alt="PayPal - The safer, easier way to pay online!"><img alt="" border=0 src="https://www.paypalobjects.com/de_DE/i/scr/pixel.gif" width=1 height=1> </form>! </div> <iframe src="//www.facebook.com/plugins/like.php?href=http%3A%2F%2Fwww.martin-finke.de%2Fblog%2F&amp;width=450&amp;height=21&amp;colorscheme=light&amp;layout=button_count&amp;action=like&amp;show_faces=false&amp;send=false" scrolling=no frameborder=0 style="border: none; overflow: hidden; width: 200px; height: 21px;" allowtransparency=true></iframe> <div class=comments> <div id=disqus_thread></div> <script type="text/javascript">var disqus_shortname="martinfinke";(function(){var a=document.createElement("script");a.type="text/javascript";a.async=true;a.src="//"+disqus_shortname+".disqus.com/embed.js";(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(a)})();</script> <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript> <a href="http://disqus.com" class=dsq-brlink>comments powered by <span class=logo-disqus>| Disqus</span></a> </div> </div> </div> <footer> <div class=content-wrap> <div class=nav><a href="/blog/">« Index</a></div> <section class=copy> <p>&copy; 2015 Martin Finke – <a href="/blog/impressum.html" class=impressum-link>Impressum</a></p> </section> </div> </footer> <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script> <script>window.jQuery||document.write('<script src="/blog/js/vendor/jquery-1.10.2.min.js"><\/script>');</script> <script type="text/javascript">$(document).ready(function(){$('a:link[href^=http]:not([href*="martin-finke.de"])').attr("target","_blank")});</script> <script type="text/javascript">var _gaq=_gaq||[];_gaq.push(["_setAccount","UA-43375106-1"]);_gaq.push(["_trackPageview"]);(function(){var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src=("https:"==document.location.protocol?"https://":"http://")+"stats.g.doubleclick.net/dc.js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(b,a)})();</script> </body> </html>

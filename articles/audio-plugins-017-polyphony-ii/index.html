@@ -1,0 +1,258 @@
+<!DOCTYPE html> <html lang=en> <head> <meta charset=utf-8> <meta http-equiv=X-UA-Compatible content="IE=edge,chrome=1"> <meta name=HandheldFriendly content=True> <meta name=MobileOptimized content=320> <meta name=viewport content="width=device-width"> <meta http-equiv=cleartype content=on> <meta property="fb:admins" content=100001493355877> <meta property="og:image" content="http://www.martin-finke.de/blog/img/making_audio_plugins_thumbnail.png"> <meta property="og:image:type" content="image/png"> <meta property="og:image:width" content=100> <meta property="og:image:height" content=100> <title>Making Audio Plugins Part 17: Polyphony Part II - Martin Finke's Blog </title> <link rel=alternate href="/blog/feed.xml" type="application/rss+xml" title="Music &amp; Programming"> <link href="http://fonts.googleapis.com/css?family=Domine:700|Inconsolata:400,700" rel=stylesheet type="text/css"> <link rel=stylesheet href='/blog/css/4407aa6.css'> </head> <body class=article-detail> <header class=header> <div class=content-wrap> <h1>Making Audio Plugins Part 17: Polyphony Part II</h1> <div class=taglinks><a href="/blog/tags/programming.html" class=taglink>Programming</a>, <a href="/blog/tags/dsp.html" class=taglink>DSP</a>, <a href="/blog/tags/making_audio_plugins.html" class=taglink>Making Audio Plugins</a> </div> </div> </header> <div id=content> <div class=content-wrap> <article class=article> <section class=content><p>In this post we’ll finish polyphony by cleaning up and making our knobs work again. <span class=more></span></p> <h2 id=spring-cleaning>Spring&nbsp;Cleaning</h2> <p>Let’s begin with the <code>MIDIReceiver</code>. We’re now polyphonic, so there’s no need for the <code>mLast</code> variables anymore. In <em>MIDIReceiver.h</em>, remove <code>mLastNoteNumber</code>, <code>mLastFrequency</code> and <code>mLastVelocity</code>, including their initializations and getter functions, i.e. <code>getLastNoteNumber</code>, <code>getLastFrequency</code> and <code>getLastVelocity</code>. Also remove the <code>noteNumberToFrequency</code> member function. Just for confirmation, the class now looks like&nbsp;this:</p> <pre><code class="lang-cpp"><span class="keyword">class</span> MIDIReceiver {
+<span class="keyword">private</span>:
+    IMidiQueue mMidiQueue;
+    <span class="keyword">static</span> <span class="keyword">const</span> <span class="keyword">int</span> keyCount = <span class="number">128</span>;
+    <span class="keyword">int</span> mNumKeys; <span class="comment">// how many keys are being played at the moment (via midi)</span>
+    <span class="keyword">bool</span> mKeyStatus[keyCount]; <span class="comment">// array of on/off for each key (index is note number)</span>
+    <span class="keyword">int</span> mOffset;
+
+<span class="keyword">public</span>:
+    MIDIReceiver() :
+    mNumKeys(<span class="number">0</span>),
+    mOffset(<span class="number">0</span>) {
+        <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; keyCount; i++) {
+            mKeyStatus[i] = <span class="keyword">false</span>;
+        }
+    };
+
+    <span class="comment">// Returns true if the key with a given index is currently pressed</span>
+    <span class="keyword">inline</span> <span class="keyword">bool</span> getKeyStatus(<span class="keyword">int</span> keyIndex) <span class="keyword">const</span> { <span class="keyword">return</span> mKeyStatus[keyIndex]; }
+    <span class="comment">// Returns the number of keys currently pressed</span>
+    <span class="keyword">inline</span> <span class="keyword">int</span> getNumKeys() <span class="keyword">const</span> { <span class="keyword">return</span> mNumKeys; }
+    <span class="keyword">void</span> advance();
+    <span class="keyword">void</span> onMessageReceived(IMidiMsg* midiMessage);
+    <span class="keyword">inline</span> <span class="keyword">void</span> Flush(<span class="keyword">int</span> nFrames) { mMidiQueue.Flush(nFrames); mOffset = <span class="number">0</span>; }
+    <span class="keyword">inline</span> <span class="keyword">void</span> Resize(<span class="keyword">int</span> blockSize) { mMidiQueue.Resize(blockSize); }
+
+    Signal2&lt; <span class="keyword">int</span>, <span class="keyword">int</span> &gt; noteOn;
+    Signal2&lt; <span class="keyword">int</span>, <span class="keyword">int</span> &gt; noteOff;
+};
+</code></pre> <p>In <em>MIDIReceiver.cpp</em>, modify the <code>advance</code> function:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> MIDIReceiver::advance() {
+    <span class="keyword">while</span> (!mMidiQueue.Empty()) {
+        IMidiMsg* midiMessage = mMidiQueue.Peek();
+        <span class="keyword">if</span> (midiMessage-&gt;mOffset &gt; mOffset) <span class="keyword">break</span>;
+
+        IMidiMsg::EStatusMsg status = midiMessage-&gt;StatusMsg();
+        <span class="keyword">int</span> noteNumber = midiMessage-&gt;NoteNumber();
+        <span class="keyword">int</span> velocity = midiMessage-&gt;Velocity();
+        <span class="comment">// There are only note on/off messages in the queue, see ::OnMessageReceived</span>
+        <span class="keyword">if</span> (status == IMidiMsg::kNoteOn &amp;&amp; velocity) {
+            <span class="keyword">if</span>(mKeyStatus[noteNumber] == <span class="keyword">false</span>) {
+                mKeyStatus[noteNumber] = <span class="keyword">true</span>;
+                mNumKeys += <span class="number">1</span>;
+                noteOn(noteNumber, velocity);
+            }
+        } <span class="keyword">else</span> {
+            <span class="keyword">if</span>(mKeyStatus[noteNumber] == <span class="keyword">true</span>) {
+                mKeyStatus[noteNumber] = <span class="keyword">false</span>;
+                mNumKeys -= <span class="number">1</span>;
+                noteOff(noteNumber, velocity);
+            }
+        }
+        mMidiQueue.Remove();
+    }
+    mOffset++;
+}
+</code></pre> <p>Three things have changed&nbsp;here:</p> <ol> <li>The <code>mLast</code> members were&nbsp;removed</li> <li><code>noteOn</code> is emitted when <em>any</em> note is pressed (doesn’t have to be different from <code>mLastNoteNumber</code>)</li> <li><code>noteOff</code> is emitted when <em>any</em> note is released (doesn’t have to be equal to <code>mLastNoteNumber</code>)</li> </ol> <p>Moving on to <em>SpaceBass.h</em>, remove the following&nbsp;things:</p> <ul> <li><code>#include</code>s for <em>Oscillator.h</em>, <em>EnvelopeGenerator.h</em> and <em>Filter.h</em>, and <code>#include &quot;VoiceManager.h&quot;</code> instead.</li> <li><code>mOscillator</code>, <code>mEnvelopeGenerator</code>, <code>mFilter</code>, <code>mFilterEnvelopeGenerator</code> and <code>mLFO</code>.</li> <li><code>filterEnvelopeAmount</code> and <code>lfoFilterModAmount</code>.</li> <li>the member functions <code>onNoteOn</code>, <code>onNoteOff</code>, <code>onBeganEnvelopeCycle</code>, <code>onFinishedEnvelopeCycle</code>.</li> </ul> <p>Feels much cleaner, right? The plugin class doesn’t interact with the components directly anymore, only with the <code>VoiceManager</code>.<br>Add the following to the <code>private</code> section:</p> <pre><code class="lang-cpp">VoiceManager voiceManager;
+</code></pre> <p>In <em>SpaceBass.cpp</em>, replace the constructor with&nbsp;this:</p> <pre><code class="lang-cpp">SpaceBass::SpaceBass(IPlugInstanceInfo instanceInfo) : IPLUG_CTOR(kNumParams, kNumPrograms, instanceInfo), lastVirtualKeyboardNoteNumber(virtualKeyboardMinimumNoteNumber - <span class="number">1</span>) {
+    <span class="caps">TRACE</span>;
+
+    CreateParams();
+    CreateGraphics();
+    CreatePresets();
+
+    mMIDIReceiver.noteOn.Connect(&amp;voiceManager, &amp;VoiceManager::onNoteOn);
+    mMIDIReceiver.noteOff.Connect(&amp;voiceManager, &amp;VoiceManager::onNoteOff);
+}
+</code></pre> <p>The <code>mMIDIReceiver</code> now gets connected to the <code>VoiceManager</code> (instead of the plugin class). The <code>EnvelopeGenerator</code>s are now handled by the <code>VoiceManager</code> and <code>Voice</code> classes, so we don’t <code>Connect()</code> them here anymore.<br>Our <code>ProcessDoubleReplacing</code> function shows a lot of compiler errors, because it tries to access things that we just deleted. In fact, the new implementation is very simple: It’s mainly a call to <code>VoiceManager::nextSample</code>:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> SpaceBass::ProcessDoubleReplacing(
+    <span class="keyword">double</span>** inputs,
+    <span class="keyword">double</span>** outputs,
+    <span class="keyword">int</span> nFrames)
+{
+    <span class="comment">// Mutex is already locked for us.</span>
+
+    <span class="keyword">double</span> *leftOutput = outputs[<span class="number">0</span>];
+    <span class="keyword">double</span> *rightOutput = outputs[<span class="number">1</span>];
+    processVirtualKeyboard();
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; nFrames; ++i) {
+        mMIDIReceiver.advance();
+        leftOutput[i] = rightOutput[i] = voiceManager.nextSample();
+    }
+
+    mMIDIReceiver.Flush(nFrames);
+}
+</code></pre> <p>Note that all the code about the interaction between <code>Oscillator</code>s, <code>EnvelopeGenerator</code>s and the filter is gone.<br>Inside <code>Reset()</code>, we have no access to the components anymore. So we have to tell the <code>VoiceManager</code> to change the sampleRate for all&nbsp;components:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> SpaceBass::Reset()
+{
+    <span class="caps">TRACE</span>;
+    IMutexLock lock(<span class="keyword">this</span>);
+    <span class="keyword">double</span> sampleRate = GetSampleRate();
+    voiceManager.setSampleRate(sampleRate);
+}
+</code></pre> <p>We haven’t implemented this function yet. Add the following to <code>VoiceManager</code>‘s <code>public</code> section (in <em>VoiceManager.h</em>):</p> <pre><code class="lang-cpp"><span class="keyword">void</span> setSampleRate(<span class="keyword">double</span> sampleRate) {
+    EnvelopeGenerator::setSampleRate(sampleRate);
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; NumberOfVoices; i++) {
+        Voice&amp; voice = voices[i];
+        voice.mOscillatorOne.setSampleRate(sampleRate);
+        voice.mOscillatorTwo.setSampleRate(sampleRate);
+    }
+    mLFO.setSampleRate(sampleRate);
+}
+</code></pre> <p>Basically this just calls <code>setSampleRate</code> on every voice and for each component. We could set <code>Oscillator::mSampleRate</code> statically, but we’d still have to call <code>updateIncrement</code> for each <code>Oscillator</code> on each <code>Voice</code>. I find it more clear to do it like&nbsp;this.</p> <p>Our plugin is now polyphonic, with the exception that it doesn’t react to our knobs yet. But before we fix that, let’s add pitch modulation to our <code>Oscillator</code>s.</p> <h2 id=pitch-modulation>Pitch&nbsp;Modulation</h2> <p>So far we’ve mainly done <em>structural</em> refactoring changes. We’ve moved code from one part to another and deleted code that’s not needed anymore. I’ve delayed pitch modulation until this point because it has nothing to do with polyphony and it would be confusing to just mix it in here and&nbsp;there.</p> <p>In <em>Voice.cpp</em>, add this to <code>Voice::nextSample</code> (right above the <code>return</code> statement):</p> <pre><code class="lang-cpp">mOscillatorOne.setPitchMod(mLFOValue * mOscillatorOnePitchAmount);
+mOscillatorTwo.setPitchMod(mLFOValue * mOscillatorTwoPitchAmount);
+</code></pre> <p>As you can see, the pitch modulation is determined by the <span class=caps>LFO</span> value multiplied with the knob value from the <span class=caps>GUI</span>.<br>In <em>Oscillator.h</em>, add a new <code>private</code> member:</p> <pre><code class="lang-cpp"><span class="keyword">double</span> mPitchMod;
+</code></pre> <p>Initialize it in the constructor’s initializer&nbsp;list:</p> <pre><code class="lang-cpp">mPitchMod(<span class="number">0.0</span>),
+</code></pre> <p>And add a <code>public</code> setter&nbsp;function:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> setPitchMod(<span class="keyword">double</span> amount);
+</code></pre> <p>Let’s implement it (in <em>Oscillator.cpp</em>):</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Oscillator::setPitchMod(<span class="keyword">double</span> amount) {
+    mPitchMod = amount;
+    updateIncrement();
+}
+</code></pre> <p>Setting the pitch mod value influences the actual frequency that should be played. So we have to call <code>updateIncrement</code>. Inside <code>updateIncrement</code>, we somehow have to take <code>mPitchMod</code> into account. Let’s write a new <code>updateIncrement</code> step by step (replace the old one in <em>Oscillator.cpp</em>):</p> <pre><code class="lang-cpp"><span class="keyword">void</span> Oscillator::updateIncrement() {
+    <span class="keyword">double</span> pitchModAsFrequency = <span class="built_in">pow</span>(<span class="number">2.0</span>, <span class="built_in">fabs</span>(mPitchMod) * <span class="number">14.0</span>) - <span class="number">1</span>;
+    <span class="keyword">if</span> (mPitchMod &lt; <span class="number">0</span>) {
+        pitchModAsFrequency = -pitchModAsFrequency;
+    }
+</code></pre> <p>Okay, what’s going on here? <code>mPitchMod</code> is between <code>-1</code> and <code>1</code>, but we want it in terms of frequency, something like <em>“plus 491.3 Hz”</em>. The <code>pow</code> term gives us that, but we have to bypass the fact that values are negative. We do that by calling <code>fabs</code> (absolute value), and the following <code>if</code> statement gets us the negativity back. Why the <code>-1</code> at the end? If <code>mPitchMod</code> is <code>0</code>, <code>pow(2.0, 0)</code> would give us <code>1</code>, so we would have a pitch modulation of 1 Hz (which is wrong). To prevent this, we subtract <code>-1</code>.<br>Next, we make a <code>calculatedFrequency</code> out of the base <code>mFrequency</code> and the Hz value we just&nbsp;calculated:</p> <pre><code class="lang-cpp">    <span class="keyword">double</span> calculatedFrequency = fmin(fmax(mFrequency + pitchModAsFrequency, <span class="number">0</span>), mSampleRate/<span class="number">2.0</span>);
+</code></pre> <p>First, we’re adding the base frequency and the mod frequency together. The <code>fmin</code> call ensures that we’re not going higher than <em>half the sample rate</em>. We can’t go higher than this <a href="http://en.wikipedia.org/wiki/Nyquist_frequency">Nyquist frequency</a>, or else we’ll get aliasing. Similarly, we can’t have a frequency below zero, so <code>fmax</code> ensures this won’t happen.<br>Let’s finish the function by setting the phase&nbsp;increment:</p> <pre><code class="lang-cpp">    mPhaseIncrement = calculatedFrequency * <span class="number">2</span> * mPI / mSampleRate;
+}
+</code></pre> <p>This is just like before, except that we’re of course using the <code>calculatedFrequency</code> value.</p> <h2 id=making-the-gui-knobs-work>Making the <span class=caps>GUI</span> Knobs&nbsp;work</h2> <p>This is the last piece of the puzzle! After this section, our synthesizer will be&nbsp;finished!</p> <p>Let’s begin with the <span class=caps>LFO</span> knobs. They don’t affect voices, so they need a different treatment than the other parameters.In <em>SpaceBass.cpp</em>, delete the existing <code>OnParamChange</code> implementation and add this&nbsp;instead:</p> <pre><code class="lang-cpp"><span class="keyword">void</span> SpaceBass::OnParamChange(<span class="keyword">int</span> paramIdx)
+{
+    IMutexLock lock(<span class="keyword">this</span>);
+    IParam* param = GetParam(paramIdx);
+    <span class="keyword">if</span>(paramIdx == mLFOWaveform) {
+        voiceManager.setLFOMode(<span class="keyword">static_cast</span>&lt;Oscillator::OscillatorMode&gt;(param-&gt;Int()));
+    } <span class="keyword">else</span> <span class="keyword">if</span>(paramIdx == mLFOFrequency) {
+        voiceManager.setLFOFrequency(param-&gt;Value());
+    }
+}
+</code></pre> <p>We’re getting the <code>VoiceManager</code> instance, check which parameter was modified, and call either <code>setLFOMode</code> or <code>setLFOFrequency</code>. We haven’t implemented these two yet, so let’s do that next. Open <em>VoiceManager.h</em> and add the two <code>public</code> member&nbsp;functions:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">void</span> setLFOMode(Oscillator::OscillatorMode mode) { mLFO.setMode(mode); };
+<span class="keyword">inline</span> <span class="keyword">void</span> setLFOFrequency(<span class="keyword">double</span> frequency) { mLFO.setFrequency(frequency); };
+</code></pre> <p>As you can see, these two simply forward to <code>mLFO</code>.</p> <p>For all the other parameters, we’ll use C++ <em>functional</em> mechanisms. They are very nice and powerful, but rarely covered in C++ tutorials. I think you’ll agree that they’re really worth knowing! But what’s the problem we’re trying to&nbsp;solve?</p> <p>When you turn a knob, <code>OnParamChange</code> is called with a parameter index and value. Let’s say <code>mFilterCutoff</code> with a value of <code>0.3</code>. Now we have to tell the <code>VoiceManager</code>: <em>“For each <code>Voice</code>, set the filter cutoff to <code>0.3</code>“</em>. We would probably call a function <code>setFilterCutoffForEachVoice</code> that could look like this (just for&nbsp;demonstration):</p> <pre><code class="lang-cpp">VoiceManager::setFilterCutoffForEachVoice(<span class="keyword">double</span> newCutoff) {
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; NumberOfVoices; i++) {
+        voice[i].mFilter.setCutoff(newCutoff);
+    }
+}
+</code></pre> <p>This doesn’t look too bad, but we’d need about ten of these functions for all the different parameters. Each of them would be a little different, but the <code>for</code> loop would be duplicated. If only there was a way of saying: <em>“Here’s a change. Do this change to all voices”</em>. Of course, there is a way. C++ allows you to take a function, pre-fill it with some input values, pass it around and call it on different things. This is similar to JavaScript’s <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/bind">Function.prototype.bind</a>, but in C++ it’s also type-safe.<br>Let’s try this out! In <em>VoiceManager.h</em>, add this <code>#include</code>:</p> <pre><code class="lang-cpp"><span class="preprocessor">#include &lt;tr1/functional&gt;</span>
+<span class="comment">// #include &lt;functional&gt; if that doesn't work</span>
+</code></pre> <p>In the public section, add this&nbsp;line:</p> <pre><code class="lang-cpp"><span class="keyword">typedef</span> <span class="built_in">std</span>::tr1::function&lt;<span class="keyword">void</span> (Voice&amp;)&gt; VoiceChangerFunction;
+</code></pre> <p>This means: A <code>VoiceChangerFunction</code> is a function that takes a <code>Voice&amp;</code> as first parameter and returns <code>void</code>. (In fact, it doesn’t have to be a function, as long as it’s something you can call with <code>()</code>.)<br>Below that, add this&nbsp;function:</p> <pre><code class="lang-cpp"><span class="keyword">inline</span> <span class="keyword">void</span> changeAllVoices(VoiceChangerFunction changer) {
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; NumberOfVoices; i++) {
+        changer(voices[i]);
+    }
+}
+</code></pre> <p>Note how it takes a <code>VoiceChangerFunction</code>, iterates through all <code>voices</code>, and applies the <code>changer</code> to each of them.<br>Below that, add the actual functions. They all look kind of similar: Each takes a <code>Voice&amp;</code> and some other parameters, and modifies that one <code>Voice</code>. <a name=single_voice_changing_functions></a></p> <pre><code class="lang-cpp"><span class="comment">// Functions to change a single voice:</span>
+<span class="keyword">static</span> <span class="keyword">void</span> setVolumeEnvelopeStageValue(Voice&amp; voice, EnvelopeGenerator::EnvelopeStage stage, <span class="keyword">double</span> value) {
+    voice.mVolumeEnvelope.setStageValue(stage, value);
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setFilterEnvelopeStageValue(Voice&amp; voice, EnvelopeGenerator::EnvelopeStage stage, <span class="keyword">double</span> value) {
+    voice.mFilterEnvelope.setStageValue(stage, value);
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setOscillatorMode(Voice&amp; voice, <span class="keyword">int</span> oscillatorNumber, Oscillator::OscillatorMode mode) {
+    <span class="keyword">switch</span> (oscillatorNumber) {
+        <span class="keyword">case</span> <span class="number">1</span>:
+            voice.mOscillatorOne.setMode(mode);
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> <span class="number">2</span>:
+            voice.mOscillatorTwo.setMode(mode);
+            <span class="keyword">break</span>;
+    }
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setOscillatorPitchMod(Voice&amp; voice, <span class="keyword">int</span> oscillatorNumber, <span class="keyword">double</span> amount) {
+    <span class="keyword">switch</span> (oscillatorNumber) {
+        <span class="keyword">case</span> <span class="number">1</span>:
+            voice.setOscillatorOnePitchAmount(amount);
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> <span class="number">2</span>:
+            voice.setOscillatorTwoPitchAmount(amount);
+            <span class="keyword">break</span>;
+    }
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setOscillatorMix(Voice&amp; voice, <span class="keyword">double</span> value) {
+    voice.setOscillatorMix(value);
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setFilterCutoff(Voice&amp; voice, <span class="keyword">double</span> cutoff) {
+    voice.mFilter.setCutoff(cutoff);
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setFilterResonance(Voice&amp; voice, <span class="keyword">double</span> resonance) {
+    voice.mFilter.setResonance(resonance);
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setFilterMode(Voice&amp; voice, Filter::FilterMode mode) {
+    voice.mFilter.setFilterMode(mode);
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setFilterEnvAmount(Voice&amp; voice, <span class="keyword">double</span> amount) {
+    voice.setFilterEnvelopeAmount(amount);
+}
+<span class="keyword">static</span> <span class="keyword">void</span> setFilterLFOAmount(Voice&amp; voice, <span class="keyword">double</span> amount) {
+    voice.setFilterLFOAmount(amount);
+}
+</code></pre> <p>But we can’t pass these to <code>changeAllVoices</code>: They aren’t <code>VoiceChangerFunction</code>s because all of them take more arguments. We will pre-fill all arguments except for the first one (<code>Voice&amp;</code>), which will turn them into <code>VoiceChangerFunction</code>s.<br>In <em>SpaceBass.cpp</em>, <code>#include &lt;tr1/functional&gt;</code> (or <code>#include &lt;functional&gt;</code>). Inside <code>OnParamChange</code>, add an <code>else</code> case at the end, so it looks like&nbsp;this:</p> <pre><code class="lang-cpp">    <span class="comment">// ...</span>
+    } <span class="keyword">else</span> {
+        <span class="keyword">using</span> <span class="built_in">std</span>::tr1::placeholders::_1;
+        <span class="keyword">using</span> <span class="built_in">std</span>::tr1::bind;
+        VoiceManager::VoiceChangerFunction changer;
+        <span class="keyword">switch</span>(paramIdx) {
+            <span class="comment">// We'll add this part in a moment</span>
+        }
+        voiceManager.changeAllVoices(changer);
+    }
+}
+</code></pre> <p>Here we just say that we don’t want to type <code>std::tr1::</code> all the time. Now we can just type <code>_1</code> and <code>bind</code> (more on these two in a moment). We also declare a <code>VoiceChangerFunction</code>. Then there’s a <code>switch</code> that makes <code>changer</code> different for every parameter. And finally, we call <code>changeAllVoices</code>, passing the <code>changer</code> we just&nbsp;created.</p> <p>So how do we create such a <code>changer</code>?</p> <ol> <li>We take one of the <a href="/blog/articles/audio-plugins-017-polyphony-ii/#single_voice_changing_functions">functions defined&nbsp;earlier</a> </li> <li>Using <code>std::tr1::bind</code>, we pre-fill all the arguments except for the first one (<code>Voice&amp;</code>)</li> <li>This gives us a true <code>VoiceChangerFunction</code>.</li> </ol> <p>This may sound a little complicated, so let’s just see it in practice. Add the following <code>case</code> inside the <code>switch(paramIdx)</code>:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> mOsc1Waveform:
+    changer = bind(&amp;VoiceManager::setOscillatorMode,
+                   _1,
+                   <span class="number">1</span>,
+                   <span class="keyword">static_cast</span>&lt;Oscillator::OscillatorMode&gt;(param-&gt;Int()));
+    <span class="keyword">break</span>;
+</code></pre> <p>The first parameter to <code>bind</code> is the function we want to pre-fill. In this case <code>setOscillatorMode</code>. All the following parameters are things that will be pre-filled. The <code>_1</code> is the placeholder, and it means: I’m not pre-filling this parameter, I’ll pass it in when <code>changer</code> gets called. In our case this means that <code>changer</code> expects a <code>Voice&amp;</code> as its first argument, which makes it a valid <code>VoiceChangerFunction</code>. After the placeholder, we pre-fill the function with the input that’s needed: Oscillator <code>1</code>‘s waveform should be set to the parameter value. We have to cast the integer to a <code>OscillatorMode</code> <code>enum</code>.</p> <p>Let’s create the <code>changer</code> for every other parameter. They all follow the same idea, except the number and type of the pre-fill parameters are different. If you have understood the principe, you don’t really have to type these in by&nbsp;hand:</p> <pre><code class="lang-cpp"><span class="keyword">case</span> mOsc1PitchMod:
+    changer = bind(&amp;VoiceManager::setOscillatorPitchMod, _1, <span class="number">1</span>, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mOsc2Waveform:
+    changer = bind(&amp;VoiceManager::setOscillatorMode, _1, <span class="number">2</span>, <span class="keyword">static_cast</span>&lt;Oscillator::OscillatorMode&gt;(param-&gt;Int()));
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mOsc2PitchMod:
+    changer = bind(&amp;VoiceManager::setOscillatorPitchMod, _1, <span class="number">2</span>, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mOscMix:
+    changer = bind(&amp;VoiceManager::setOscillatorMix, _1, param-&gt;Value());
+    <span class="keyword">break</span>;
+    <span class="comment">// Filter Section:</span>
+<span class="keyword">case</span> mFilterMode:
+    changer = bind(&amp;VoiceManager::setFilterMode, _1, <span class="keyword">static_cast</span>&lt;Filter::FilterMode&gt;(param-&gt;Int()));
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterCutoff:
+    changer = bind(&amp;VoiceManager::setFilterCutoff, _1, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterResonance:
+    changer = bind(&amp;VoiceManager::setFilterResonance, _1, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterLfoAmount:
+    changer = bind(&amp;VoiceManager::setFilterLFOAmount, _1, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterEnvAmount:
+    changer = bind(&amp;VoiceManager::setFilterEnvAmount, _1, param-&gt;Value());
+    <span class="keyword">break</span>;
+    <span class="comment">// Volume Envelope:</span>
+<span class="keyword">case</span> mVolumeEnvAttack:
+    changer = bind(&amp;VoiceManager::setVolumeEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_ATTACK, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mVolumeEnvDecay:
+    changer = bind(&amp;VoiceManager::setVolumeEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_DECAY, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mVolumeEnvSustain:
+    changer = bind(&amp;VoiceManager::setVolumeEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_SUSTAIN, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mVolumeEnvRelease:
+    changer = bind(&amp;VoiceManager::setVolumeEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_RELEASE, param-&gt;Value());
+    <span class="keyword">break</span>;
+    <span class="comment">// Filter Envelope:</span>
+<span class="keyword">case</span> mFilterEnvAttack:
+    changer = bind(&amp;VoiceManager::setFilterEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_ATTACK, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterEnvDecay:
+    changer = bind(&amp;VoiceManager::setFilterEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_DECAY, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterEnvSustain:
+    changer = bind(&amp;VoiceManager::setFilterEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_SUSTAIN, param-&gt;Value());
+    <span class="keyword">break</span>;
+<span class="keyword">case</span> mFilterEnvRelease:
+    changer = bind(&amp;VoiceManager::setFilterEnvelopeStageValue, _1, EnvelopeGenerator::ENVELOPE_STAGE_RELEASE, param-&gt;Value());
+    <span class="keyword">break</span>;
+</code></pre> <p>Note that all of this is type-safe: You can’t, for example, make a <code>changer</code> to change the filter cutoff and pre-fill it with an <code>enum</code> value or with the wrong number of parameters.<br>If at some point you decide to handle your <code>VoiceManager</code>‘s <code>voices</code> as a linked list with dynamic memory allocation, you just have to change <code>changeAllVoices</code>. All other parts of the code can stay the&nbsp;same.</p> <h2 id=finished->Finished!</h2> <p>Congratulations, you have built a polyphonic synthesizer! I know this was <em>a lot</em> of work, and I hope it wasn’t too difficult. If you have read this far and something still doesn’t work, please leave a comment and I’ll help you out. For reference, you can download the source code with all the images <a href="/blog/articles/audio-plugins-017-polyphony-ii/source.zip">here</a>. The next projects will be a smaller&nbsp;scale.</p> <p><a href="/blog/articles/audio-plugins-018-polyblep-oscillator/">Click here</a> to go to the next post, where we get rid of the Oscillator&nbsp;aliasing.</p> <p><a href="/blog/articles/audio-plugins-017-polyphony-ii/finished.png"><img src="/blog/articles/audio-plugins-017-polyphony-ii/finished.png" alt=""></a></p> </section> </article> <div id=donation_prompt>If you found this useful, please feel free to <form action="https://www.paypal.com/cgi-bin/webscr" method=post target=_top class=donation-form> <input type=hidden name=cmd value=_s-xclick> <input type=hidden name=hosted_button_id value=JQDU8W5PJBWL6> <input type=hidden name=ref value="/blog/articles/audio-plugins-017-polyphony-ii/"> <input type=image src="https://www.paypalobjects.com/en_US/i/btn/btn_donate_SM.gif" border=0 name=submit alt="PayPal - The safer, easier way to pay online!"><img alt="" border=0 src="https://www.paypalobjects.com/de_DE/i/scr/pixel.gif" width=1 height=1> </form>! </div> <iframe src="//www.facebook.com/plugins/like.php?href=http%3A%2F%2Fwww.martin-finke.de%2Fblog%2F&amp;width=450&amp;height=21&amp;colorscheme=light&amp;layout=button_count&amp;action=like&amp;show_faces=false&amp;send=false" scrolling=no frameborder=0 style="border: none; overflow: hidden; width: 200px; height: 21px;" allowtransparency=true></iframe> <div class=comments> <div id=disqus_thread></div> <script type="text/javascript">var disqus_shortname="martinfinke";(function(){var a=document.createElement("script");a.type="text/javascript";a.async=true;a.src="//"+disqus_shortname+".disqus.com/embed.js";(document.getElementsByTagName("head")[0]||document.getElementsByTagName("body")[0]).appendChild(a)})();</script> <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript> <a href="http://disqus.com" class=dsq-brlink>comments powered by <span class=logo-disqus>| Disqus</span></a> </div> </div> </div> <footer> <div class=content-wrap> <div class=nav><a href="/blog/">« Index</a></div> <section class=copy> <p>&copy; 2015 Martin Finke – <a href="/blog/impressum.html" class=impressum-link>Impressum</a></p> </section> </div> </footer> <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script> <script>window.jQuery||document.write('<script src="/blog/js/vendor/jquery-1.10.2.min.js"><\/script>');</script> <script type="text/javascript">$(document).ready(function(){$('a:link[href^=http]:not([href*="martin-finke.de"])').attr("target","_blank")});</script> <script type="text/javascript">var _gaq=_gaq||[];_gaq.push(["_setAccount","UA-43375106-1"]);_gaq.push(["_trackPageview"]);(function(){var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src=("https:"==document.location.protocol?"https://":"http://")+"stats.g.doubleclick.net/dc.js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(b,a)})();</script> </body> </html>
